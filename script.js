@@ -21,6 +21,9 @@
   const lbModalBg = document.getElementById('lb-modal-bg');
   const lbList = document.getElementById('lb-list');
   const lbTabs = document.querySelectorAll('.lb-tab');
+  const userChip = document.getElementById('user-chip');
+  const userAvatar = document.getElementById('user-avatar');
+  const userName = document.getElementById('user-name');
   const modeBtns = document.querySelectorAll('.mode-btn');
   const durChips = document.querySelectorAll('.dur-chip');
   const screens = {
@@ -102,6 +105,77 @@
   const currentUser = { vk_user_id: null, first_name: '', last_name: '', photo_100: '' };
   let vkSignParamsStr = '';
 
+  // VK Storage — ключи рекордов (синк между устройствами, как в Fruit Blast)
+  const VK_STORAGE = {
+    bestEndless: 'snakeBestScore',
+    bestRace: (d) => 'snakeBestRace' + d,
+    all: () => [VK_STORAGE.bestEndless].concat(RACE_DURATIONS.map((d) => VK_STORAGE.bestRace(d))),
+  };
+
+  function vkAvailable() {
+    return typeof vkBridge !== 'undefined' && !!vkBridge.send;
+  }
+
+  function vkStorageGetBatch(keysArr) {
+    return new Promise((resolve) => {
+      const out = {};
+      if (!vkAvailable() || !Array.isArray(keysArr) || keysArr.length === 0) { resolve(out); return; }
+      const unique = [];
+      keysArr.forEach((k) => { if (!unique.includes(k)) unique.push(k); });
+      vkBridge.send('VKWebAppStorageGet', { keys: unique }).then((res) => {
+        if (res && Array.isArray(res.keys)) {
+          res.keys.forEach((row) => {
+            if (row && row.key !== undefined) out[row.key] = (row.value === undefined || row.value === null) ? null : row.value;
+          });
+        }
+        resolve(out);
+      }).catch(() => resolve(out));
+    });
+  }
+
+  function vkStorageSet(key, value) {
+    if (!vkAvailable()) return Promise.resolve();
+    return vkBridge.send('VKWebAppStorageSet', { key, value: String(value) }).catch(() => {});
+  }
+
+  function applyUserChip() {
+    const fullName = [currentUser.first_name, currentUser.last_name].filter(Boolean).join(' ').trim();
+    if (!fullName) return;
+    userName.textContent = fullName;
+    if (currentUser.photo_100) {
+      userAvatar.src = currentUser.photo_100;
+      userAvatar.hidden = false;
+    }
+    userChip.classList.remove('hidden');
+  }
+
+  // читаем рекорды из VK Storage, берём максимум с локальными и пишем обратно
+  function syncBestScoresFromVk() {
+    const keys = { endless: VK_STORAGE.bestEndless };
+    RACE_DURATIONS.forEach((d) => { keys['race' + d] = VK_STORAGE.bestRace(d); });
+
+    vkStorageGetBatch(Object.values(keys)).then((remote) => {
+      let changed = false;
+      const merge = (key, val) => {
+        const prev = Number(val) || 0;
+        if (key === 'endless') {
+          if (prev > bestEndless) { bestEndless = prev; localStorage.setItem(BEST_ENDLESS_KEY, String(bestEndless)); changed = true; }
+        } else {
+          const d = Number(key.replace('race', ''));
+          if (prev > (bestRace[d] || 0)) { bestRace[d] = prev; localStorage.setItem(BEST_RACE_KEY(d), String(prev)); changed = true; }
+        }
+      };
+      Object.keys(keys).forEach((k) => {
+        const rv = remote[keys[k]];
+        if (rv != null) merge(k, rv);
+      });
+      // если локальный рекорд выше — подтягиваем его в облако
+      vkStorageSet(VK_STORAGE.bestEndless, bestEndless);
+      RACE_DURATIONS.forEach((d) => vkStorageSet(VK_STORAGE.bestRace(d), bestRace[d] || 0));
+      if (changed) applyModeUI();
+    }).catch(() => {});
+  }
+
   function getVKLaunchParamsStr() {
     try {
       const full = ((window.location.search || '') + '&' + (window.location.hash || '').replace(/^#/, '')).replace(/^&/, '');
@@ -124,7 +198,8 @@
       const uid = lp.get('vk_user_id');
       if (uid) currentUser.vk_user_id = Number(uid) || uid;
     } catch (_) { /* игнор */ }
-    if (typeof vkBridge === 'undefined' || !vkBridge.send) return;
+    syncBestScoresFromVk();
+    if (!vkAvailable()) return;
     vkBridge.send('VKWebAppInit', {}).then(() =>
       vkBridge.send('VKWebAppGetUserInfo', {}).then((res) => {
         if (res) {
@@ -134,6 +209,8 @@
           currentUser.first_name = res.first_name || '';
           currentUser.last_name = res.last_name || '';
           currentUser.photo_100 = res.photo_100 || '';
+          applyUserChip();
+          syncBestScoresFromVk();
         }
       }).catch(() => {})
     ).catch(() => {});
@@ -152,9 +229,11 @@
     if (mode === MODE_RACE) {
       bestRace[raceDuration] = n;
       localStorage.setItem(BEST_RACE_KEY(raceDuration), String(n));
+      vkStorageSet(VK_STORAGE.bestRace(raceDuration), n);
     } else {
       bestEndless = n;
       localStorage.setItem(BEST_ENDLESS_KEY, String(n));
+      vkStorageSet(VK_STORAGE.bestEndless, n);
     }
   }
 
@@ -515,17 +594,30 @@
     const frag = document.createDocumentFragment();
     list.forEach((u, i) => {
       const row = document.createElement('div');
-      row.className = 'lb-row' + (i < 3 ? ' lb-top' : '');
+      const isSelf = currentUser.vk_user_id != null && String(u.vk_user_id) === String(currentUser.vk_user_id);
+      row.className = 'lb-row' + (i < 3 ? ' lb-top' : '') + (isSelf ? ' lb-self' : '');
       const rank = document.createElement('span');
       rank.className = 'lb-rank' + (i === 0 ? ' lb-first' : '');
       rank.textContent = i + 1;
+      const av = document.createElement('span');
+      av.className = 'lb-avatar';
+      if (u.photo_100) {
+        const img = document.createElement('img');
+        img.className = 'lb-avatar-img';
+        img.alt = '';
+        img.src = u.photo_100;
+        img.onerror = function () { img.style.display = 'none'; };
+        av.appendChild(img);
+      } else {
+        av.textContent = ((u.first_name || 'И').charAt(0)).toUpperCase();
+      }
       const name = document.createElement('span');
       name.className = 'lb-name';
       name.textContent = [u.first_name, u.last_name].filter(Boolean).join(' ').trim() || 'Игрок';
       const sc = document.createElement('span');
       sc.className = 'lb-score';
       sc.textContent = u.score;
-      row.append(rank, name, sc);
+      row.append(rank, av, name, sc);
       frag.appendChild(row);
     });
     lbList.appendChild(frag);
