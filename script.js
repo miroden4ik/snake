@@ -34,7 +34,6 @@
   const btnPlay = document.getElementById('btn-play');
   const btnRetry = document.getElementById('btn-retry');
   const btnHome = document.getElementById('btn-home');
-  const dpadBtns = document.querySelectorAll('.dpad-btn');
 
   // ---------- Constants ----------
   const GRID = 15;
@@ -673,42 +672,49 @@
     }
   });
 
-  dpadBtns.forEach((btn) => {
-    const onPress = () => {
-      const dirStr = btn.dataset.dir;
-      const map = {
-        up: () => setDirection(0, -1),
-        down: () => setDirection(0, 1),
-        left: () => setDirection(-1, 0),
-        right: () => setDirection(1, 0),
-      };
-      map[dirStr]();
-    };
-    btn.addEventListener('click', onPress);
-    btn.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      onPress();
-    }, { passive: false });
-  });
+  let swipeStart = null;
+  let swipeConsumed = false;
+  const SWIPE_MIN = 14;
 
-  let touchStart = null;
-  canvas.addEventListener('touchstart', (e) => {
-    const t = e.touches[0];
-    touchStart = { x: t.clientX, y: t.clientY };
-  }, { passive: true });
-  canvas.addEventListener('touchend', (e) => {
-    if (!touchStart) return;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - touchStart.x;
-    const dy = t.clientY - touchStart.y;
-    touchStart = null;
-    if (Math.abs(dx) < 20 && Math.abs(dy) < 20) return;
-    if (Math.abs(dx) > Math.abs(dy)) {
-      setDirection(dx > 0 ? 1 : -1, 0);
-    } else {
-      setDirection(0, dy > 0 ? 1 : -1);
-    }
-  }, { passive: true });
+  function swipeStartFn(e) {
+    const t = e.touches && e.touches[0];
+    if (!t) return;
+    swipeStart = { x: t.clientX, y: t.clientY };
+    swipeConsumed = false;
+  }
+
+  function swipeMoveFn(e) {
+    if (!swipeStart || swipeConsumed) return;
+    const t = e.touches && e.touches[0];
+    if (!t) return;
+    // пока жест не сработал — запрещаем прокрутку страницы пальцем
+    e.preventDefault();
+    const dx = t.clientX - swipeStart.x;
+    const dy = t.clientY - swipeStart.y;
+    if (Math.abs(dx) < SWIPE_MIN && Math.abs(dy) < SWIPE_MIN) return;
+    if (Math.abs(dx) >= Math.abs(dy)) setDirection(dx > 0 ? 1 : -1, 0);
+    else setDirection(0, dy > 0 ? 1 : -1);
+    swipeConsumed = true;
+  }
+
+  function swipeEndFn(e) {
+    if (!swipeStart) return;
+    const start = swipeStart;
+    const t = e.changedTouches && e.changedTouches[0];
+    const xy = t ? { x: t.clientX, y: t.clientY } : start;
+    swipeStart = null;
+    if (swipeConsumed) return;
+    const dx = xy.x - start.x;
+    const dy = xy.y - start.y;
+    if (Math.abs(dx) < SWIPE_MIN && Math.abs(dy) < SWIPE_MIN) return;
+    if (Math.abs(dx) >= Math.abs(dy)) setDirection(dx > 0 ? 1 : -1, 0);
+    else setDirection(0, dy > 0 ? 1 : -1);
+  }
+
+  window.addEventListener('touchstart', swipeStartFn, { passive: true });
+  window.addEventListener('touchmove', swipeMoveFn, { passive: false });
+  window.addEventListener('touchend', swipeEndFn, { passive: true });
+  window.addEventListener('touchcancel', swipeEndFn, { passive: true });
 
   // ---------- Buttons ----------
   btnPlay.addEventListener('click', startGame);
