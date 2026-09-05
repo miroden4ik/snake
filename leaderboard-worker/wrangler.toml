@@ -1,0 +1,7 @@
+name = "snake-leaderboard"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+kv_namespaces = [
+  { binding = "SNAKE_LB", id = "295cf4e1ca8b49ca98ce952a263b0583", preview_id = "295cf4e1ca8b49ca98ce952a263b0583" }
+]
