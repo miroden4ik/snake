@@ -82,8 +82,11 @@
     normal: 140,
     fast: 80,
   };
+  const ENDLESS_SPEED_NAMES = Object.keys(ENDLESS_SPEEDS);
   const ENDLESS_SPEED_KEY = 'snake_endless_speed';
-  const BEST_ENDLESS_KEY = 'snake_best_score';
+  // рекорд «Бесконечной» ведётся отдельно для каждой скорости
+  const BEST_ENDLESS_KEY = (s) => 'snake_best_score_' + s;
+  const LEGACY_BEST_ENDLESS_KEY = 'snake_best_score';
   const BEST_RACE_KEY = (d) => 'snake_best_race' + d;
   const MODE_KEY = 'snake_mode';
   const DUR_KEY = 'snake_duration';
@@ -107,7 +110,6 @@
   let nextDir = { x: 1, y: 0 };
   let food = null;
   let score = 0;
-  let bestEndless = Number(store.get(BEST_ENDLESS_KEY) || 0);
   const bestRace = {};
   RACE_DURATIONS.forEach((d) => {
     bestRace[d] = Number(store.get(BEST_RACE_KEY(d)) || 0);
@@ -126,10 +128,20 @@
   let mode = store.get(MODE_KEY) === MODE_RACE ? MODE_RACE : MODE_ENDLESS;
   let raceDuration = Number(store.get(DUR_KEY) || DEFAULT_RACE_DURATION);
   let raceEndAt = 0;
-  const endlessSpeedDefault = Object.keys(ENDLESS_SPEEDS)[0];
+  const endlessSpeedDefault = 'normal';
   let endlessSpeed = Object.prototype.hasOwnProperty.call(ENDLESS_SPEEDS, store.get(ENDLESS_SPEED_KEY))
     ? store.get(ENDLESS_SPEED_KEY)
     : endlessSpeedDefault;
+  const bestEndless = {};
+  ENDLESS_SPEED_NAMES.forEach((s) => {
+    bestEndless[s] = Number(store.get(BEST_ENDLESS_KEY(s)) || 0);
+  });
+  // миграция: старый общий рекорд «Бесконечной» → в скорость «средняя»
+  const legacyEndless = Number(store.get(LEGACY_BEST_ENDLESS_KEY) || 0) || 0;
+  if (legacyEndless > 0 && bestEndless[endlessSpeedDefault] < legacyEndless) {
+    bestEndless[endlessSpeedDefault] = legacyEndless;
+    store.set(BEST_ENDLESS_KEY(endlessSpeedDefault), String(legacyEndless));
+  }
   // сохранённая партия: {saved: bool, mode, score, snake, dir, nextDir, food, raceLeftMs, raceEndAt}
   let savedGame = null;
   try { const raw = store.get(SAVE_KEY); if (raw) savedGame = JSON.parse(raw) || null; } catch (_) { savedGame = null; }
@@ -155,9 +167,11 @@
 
   // VK Storage — ключи рекордов (синк между устройствами, как в Fruit Blast)
   const VK_STORAGE = {
-    bestEndless: 'snakeBestScore',
+    bestEndless: (s) => 'snakeBestScore' + (s ? s[0].toUpperCase() + s.slice(1) : ''),
+    legacyEndless: 'snakeBestScore',
     bestRace: (d) => 'snakeBestRace' + d,
-    all: () => [VK_STORAGE.bestEndless].concat(RACE_DURATIONS.map((d) => VK_STORAGE.bestRace(d))),
+    all: () => ENDLESS_SPEED_NAMES.map((s) => VK_STORAGE.bestEndless(s))
+      .concat(RACE_DURATIONS.map((d) => VK_STORAGE.bestRace(d))),
   };
 
   function vkAvailable() {
@@ -199,26 +213,43 @@
 
   // читаем рекорды из VK Storage, берём максимум с локальными и пишем обратно
   function syncBestScoresFromVk() {
-    const keys = { endless: VK_STORAGE.bestEndless };
+    const keys = {};
+    ENDLESS_SPEED_NAMES.forEach((s) => { keys['endless_' + s] = VK_STORAGE.bestEndless(s); });
+    keys.legacyEndless = VK_STORAGE.legacyEndless;
     RACE_DURATIONS.forEach((d) => { keys['race' + d] = VK_STORAGE.bestRace(d); });
 
     vkStorageGetBatch(Object.values(keys)).then((remote) => {
       let changed = false;
       const merge = (key, val) => {
         const prev = Number(val) || 0;
-        if (key === 'endless') {
-          if (prev > bestEndless) { bestEndless = prev; store.set(BEST_ENDLESS_KEY, String(bestEndless)); changed = true; }
-        } else {
-          const d = Number(key.replace('race', ''));
-          if (prev > (bestRace[d] || 0)) { bestRace[d] = prev; store.set(BEST_RACE_KEY(d), String(prev)); changed = true; }
+        if (key.indexOf('endless_') === 0) {
+          const s = key.slice('endless_'.length);
+          if (prev > (bestEndless[s] || 0)) {
+            bestEndless[s] = prev;
+            store.set(BEST_ENDLESS_KEY(s), String(prev));
+            changed = true;
+          }
+          return;
         }
+        if (key === 'legacyEndless') {
+          // старый общий рекорд → «средняя» скорость
+          if (prev > (bestEndless[endlessSpeedDefault] || 0)) {
+            bestEndless[endlessSpeedDefault] = prev;
+            store.set(BEST_ENDLESS_KEY(endlessSpeedDefault), String(prev));
+            changed = true;
+          }
+          return;
+        }
+        const d = Number(key.replace('race', ''));
+        if (prev > (bestRace[d] || 0)) { bestRace[d] = prev; store.set(BEST_RACE_KEY(d), String(prev)); changed = true; }
       };
       Object.keys(keys).forEach((k) => {
         const rv = remote[keys[k]];
         if (rv != null) merge(k, rv);
       });
       // если локальный рекорд выше — подтягиваем его в облако
-      vkStorageSet(VK_STORAGE.bestEndless, bestEndless);
+      ENDLESS_SPEED_NAMES.forEach((s) => vkStorageSet(VK_STORAGE.bestEndless(s), bestEndless[s] || 0));
+      vkStorageSet(VK_STORAGE.legacyEndless, bestEndless[endlessSpeedDefault] || 0);
       RACE_DURATIONS.forEach((d) => vkStorageSet(VK_STORAGE.bestRace(d), bestRace[d] || 0));
       if (changed) applyModeUI();
     }).catch(() => {});
@@ -277,7 +308,7 @@
   }
 
   function getBest() {
-    return mode === MODE_RACE ? (bestRace[raceDuration] || 0) : bestEndless;
+    return mode === MODE_RACE ? (bestRace[raceDuration] || 0) : (bestEndless[endlessSpeed] || 0);
   }
 
   function setBest(n) {
@@ -286,9 +317,9 @@
       store.set(BEST_RACE_KEY(raceDuration), String(n));
       vkStorageSet(VK_STORAGE.bestRace(raceDuration), n);
     } else {
-      bestEndless = n;
-      store.set(BEST_ENDLESS_KEY, String(n));
-      vkStorageSet(VK_STORAGE.bestEndless, n);
+      bestEndless[endlessSpeed] = n;
+      store.set(BEST_ENDLESS_KEY(endlessSpeed), String(n));
+      vkStorageSet(VK_STORAGE.bestEndless(endlessSpeed), n);
     }
   }
 
