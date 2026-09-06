@@ -68,6 +68,16 @@
   const soundOnIc = document.getElementById('sound-on-ic');
   const soundOffIc = document.getElementById('sound-off-ic');
 
+  // ========== Shop DOM refs ==========
+  const coinsEl = document.getElementById('coins');
+  const btnShop = document.getElementById('btn-shop');
+  const shopModal = document.getElementById('shop-modal');
+  const shopModalBg = document.getElementById('shop-modal-bg');
+  const btnShopClose = document.getElementById('btn-shop-close');
+  const shopItemsEl = document.getElementById('shop-items');
+  const shopTabs = document.querySelectorAll('.shop-tab');
+  const shopCoinsCount = document.getElementById('shop-coins-count');
+
   // ---------- Constants ----------
   const GRID = 15;
   const BASE_SPEED = 140;
@@ -103,7 +113,96 @@
     pupil: '#222222',
   };
 
+  // ========== МАГАЗИН: КАТАЛОГ ТОВАРОВ ==========
+  const COINS_PER_APPLE = 1;
+  const COINS_KEY = 'snake_coins';
+  const OWNED_KEY = 'snake_owned_items';
+  const EQUIPPED_KEY = 'snake_equipped_items';
+
+  const SHOP_CATALOG = {
+    snake: [
+      { id: 'snake_default', name: 'Классика', price: 0, body: '#6BCB77', bodyDark: '#5BB868', head: '#4AA858' },
+      { id: 'snake_blue', name: 'Лазурная', price: 150, body: '#4FC3F7', bodyDark: '#29B6F6', head: '#0288D1' },
+      { id: 'snake_rose', name: 'Розовая', price: 200, body: '#F48FB1', bodyDark: '#F06292', head: '#C2185B' },
+      { id: 'snake_sun', name: 'Солнечная', price: 250, body: '#FFD54F', bodyDark: '#FFCA28', head: '#F9A825' },
+      { id: 'snake_purple', name: 'Аметист', price: 300, body: '#BA68C8', bodyDark: '#AB47BC', head: '#7B1FA2' },
+      { id: 'snake_fire', name: 'Огненная', price: 450, body: '#FF7043', bodyDark: '#F4511E', head: '#D84315' },
+      { id: 'snake_ocean', name: 'Океан', price: 500, body: '#26C6DA', bodyDark: '#00ACC1', head: '#00695C' },
+      { id: 'snake_choco', name: 'Шоколад', price: 350, body: '#A1887F', bodyDark: '#8D6E63', head: '#5D4037' },
+      { id: 'snake_rainbow', name: 'Радужная', price: 800, rainbow: true },
+      { id: 'snake_gold', name: 'Золотая', price: 1000, body: '#FFD700', bodyDark: '#FFB300', head: '#FF8F00', glow: true },
+      { id: 'snake_neon', name: 'Неон', price: 700, body: '#B2FF59', bodyDark: '#76FF03', head: '#64DD17' },
+      { id: 'snake_ice', name: 'Ледяная', price: 600, body: '#B3E5FC', bodyDark: '#81D4FA', head: '#0277BD' },
+    ],
+    food: [
+      { id: 'food_apple', name: 'Яблоко', price: 0, type: 'apple', color: '#E84545', highlight: '#FF6B6B' },
+      { id: 'food_banana', name: 'Банан', price: 150, type: 'banana', color: '#FFD93D', highlight: '#FFF176' },
+      { id: 'food_grape', name: 'Виноград', price: 200, type: 'grape', color: '#9C27B0', highlight: '#BA68C8' },
+      { id: 'food_strawberry', name: 'Клубника', price: 250, type: 'strawberry', color: '#E91E63', highlight: '#F06292' },
+      { id: 'food_orange', name: 'Апельсин', price: 180, type: 'orange', color: '#FF9800', highlight: '#FFB74D' },
+      { id: 'food_watermelon', name: 'Арбуз', price: 300, type: 'watermelon', color: '#4CAF50', highlight: '#81C784' },
+      { id: 'food_cherry', name: 'Вишня', price: 220, type: 'cherry', color: '#C62828', highlight: '#EF5350' },
+      { id: 'food_pineapple', name: 'Ананас', price: 400, type: 'pineapple', color: '#FDD835', highlight: '#FFF176' },
+      { id: 'food_kiwi', name: 'Киви', price: 280, type: 'kiwi', color: '#689F38', highlight: '#AED581' },
+      { id: 'food_peach', name: 'Персик', price: 240, type: 'peach', color: '#FF8A65', highlight: '#FFAB91' },
+      { id: 'food_golden_apple', name: 'Золотое яблоко', price: 1000, type: 'golden', color: '#FFD700', highlight: '#FFECB3', sparkle: true },
+      { id: 'food_diamond', name: 'Бриллиант', price: 900, type: 'diamond', color: '#4DD0E1', highlight: '#80DEEA', sparkle: true },
+    ],
+    accessory: [
+      { id: 'acc_none', name: 'Нет', price: 0, type: 'none' },
+      { id: 'acc_hat_red', name: 'Красная шапка', price: 200, type: 'hat', color: '#E53935' },
+      { id: 'acc_hat_blue', name: 'Синяя шапка', price: 200, type: 'hat', color: '#1E88E5' },
+      { id: 'acc_crown', name: 'Корона', price: 900, type: 'crown', color: '#FFD700' },
+      { id: 'acc_glasses_sun', name: 'Солнцезащитные очки', price: 300, type: 'glasses', color: '#212121' },
+      { id: 'acc_glasses_nerd', name: 'Очки для зрения', price: 250, type: 'glasses_nerd', color: '#455A64' },
+      { id: 'acc_bow_pink', name: 'Розовый бант', price: 180, type: 'bow', color: '#F06292' },
+      { id: 'acc_flower', name: 'Цветок', price: 220, type: 'flower', color: '#EC407A' },
+      { id: 'acc_headphones', name: 'Наушники', price: 400, type: 'headphones', color: '#546E7A' },
+      { id: 'acc_party_hat', name: 'Праздничная шапочка', price: 150, type: 'party_hat', color: '#AB47BC' },
+      { id: 'acc_wizard_hat', name: 'Шляпа волшебника', price: 600, type: 'wizard_hat', color: '#311B92' },
+      { id: 'acc_viking_helmet', name: 'Шлем викинга', price: 800, type: 'viking', color: '#9E9E9E' },
+    ],
+    background: [
+      { id: 'bg_default', name: 'Классика', price: 0, type: 'solid', color: '#243B58', alt: '#1E334A' },
+      { id: 'bg_forest', name: 'Лес', price: 200, type: 'solid', color: '#1B5E20', alt: '#2E7D32' },
+      { id: 'bg_sunset', name: 'Закат', price: 350, type: 'gradient', color: '#FF6F00', alt: '#C2185B' },
+      { id: 'bg_ocean', name: 'Море', price: 300, type: 'gradient', color: '#006994', alt: '#00ACC1' },
+      { id: 'bg_space', name: 'Космос', price: 600, type: 'gradient', color: '#1A1A2E', alt: '#16213E' },
+      { id: 'bg_candy', name: 'Карамель', price: 250, type: 'gradient', color: '#F8BBD0', alt: '#F48FB1' },
+      { id: 'bg_grass', name: 'Поле', price: 180, type: 'solid', color: '#558B2F', alt: '#689F38' },
+      { id: 'bg_sand', name: 'Пляж', price: 220, type: 'solid', color: '#F9A825', alt: '#FDD835' },
+      { id: 'bg_ice', name: 'Снежок', price: 280, type: 'gradient', color: '#81D4FA', alt: '#B3E5FC' },
+      { id: 'bg_lava', name: 'Лава', price: 500, type: 'gradient', color: '#BF360C', alt: '#E64A19' },
+      { id: 'bg_aurora', name: 'Аврора', price: 800, type: 'gradient', color: '#004D40', alt: '#1B5E20', alt2: '#7B1FA2' },
+      { id: 'bg_royal', name: 'Королевский', price: 1000, type: 'gradient', color: '#4A148C', alt: '#880E4F' },
+    ],
+  };
+
+  const SHOP_CATEGORIES = ['snake', 'food', 'accessory', 'background'];
+
   // ---------- State ----------
+  // Shop state
+  let coins = Number(store.get(COINS_KEY) || 0);
+  let ownedItems = (() => {
+    try {
+      const raw = store.get(OWNED_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return (parsed && Array.isArray(parsed)) ? parsed : ['snake_default', 'food_apple', 'acc_none', 'bg_default'];
+    } catch (_) {
+      return ['snake_default', 'food_apple', 'acc_none', 'bg_default'];
+    }
+  })();
+  let equippedItems = (() => {
+    try {
+      const raw = store.get(EQUIPPED_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return (parsed && typeof parsed === 'object') ? parsed : { snake: 'snake_default', food: 'food_apple', accessory: 'acc_none', background: 'bg_default' };
+    } catch (_) {
+      return { snake: 'snake_default', food: 'food_apple', accessory: 'acc_none', background: 'bg_default' };
+    }
+  })();
+  let currentShopCategory = 'snake';
+
   let snake = [];
   let prevSnake = [];
   let dir = { x: 1, y: 0 };
@@ -391,6 +490,567 @@
     btnSound.classList.toggle('muted', sfxMuted);
   }
 
+  // ========== SHOP: Утилиты ==========
+  function saveShopState() {
+    store.set(COINS_KEY, String(coins));
+    try { store.set(OWNED_KEY, JSON.stringify(ownedItems)); } catch (_) {}
+    try { store.set(EQUIPPED_KEY, JSON.stringify(equippedItems)); } catch (_) {}
+  }
+
+  function updateCoinsUI() {
+    if (coinsEl) coinsEl.textContent = coins;
+    if (shopCoinsCount) shopCoinsCount.textContent = coins;
+  }
+
+  function getItemById(id) {
+    for (const cat of SHOP_CATEGORIES) {
+      const found = SHOP_CATALOG[cat].find(x => x.id === id);
+      if (found) return { item: found, category: cat };
+    }
+    return null;
+  }
+
+  function getEquipped(cat) {
+    const id = equippedItems[cat];
+    return SHOP_CATALOG[cat].find(x => x.id === id) || SHOP_CATALOG[cat][0];
+  }
+
+  function isOwned(id) {
+    return ownedItems.includes(id);
+  }
+
+  function isEquipped(cat, id) {
+    return equippedItems[cat] === id;
+  }
+
+  function buyItem(item) {
+    if (isOwned(item.id)) return { success: true, message: 'Уже куплен' };
+    if (coins < item.price) return { success: false, message: 'Недостаточно монет' };
+    coins -= item.price;
+    ownedItems.push(item.id);
+    saveShopState();
+    updateCoinsUI();
+    return { success: true, message: 'Куплено!' };
+  }
+
+  function equipItem(cat, item) {
+    if (!isOwned(item.id)) return { success: false, message: 'Сначала купите' };
+    equippedItems[cat] = item.id;
+    saveShopState();
+    return { success: true, message: 'Экипировано!' };
+  }
+
+  function addCoins(n) {
+    coins += n;
+    saveShopState();
+    updateCoinsUI();
+  }
+
+  // ========== SHOP: Рендер превью товаров на canvas ==========
+  function drawSnakePreview(c, item, size) {
+    const s = size / 8;
+    // Сегменты змейки
+    const segs = [
+      { x: 1, y: 4 }, { x: 2, y: 4 }, { x: 3, y: 4 }, { x: 3, y: 3 }, { x: 4, y: 3 }, { x: 5, y: 3 },
+    ];
+    const getC = (i) => {
+      if (item.rainbow) {
+        const hues = [0, 45, 90, 180, 240, 300];
+        return `hsl(${hues[i % hues.length]}, 80%, 60%)`;
+      }
+      return i === segs.length - 1 ? item.head : (i % 2 === 0 ? item.body : (item.bodyDark || item.body));
+    };
+    for (let i = 0; i < segs.length; i++) {
+      const sg = segs[i];
+      const isHead = i === segs.length - 1;
+      c.fillStyle = getC(i);
+      if (item.glow) c.shadowColor = '#FFD700', c.shadowBlur = 8;
+      const x = sg.x * s + s * 0.1, y = sg.y * s + s * 0.1, w = s * 0.8, h = s * 0.8;
+      roundRect(c, x, y, w, h, s * 0.2);
+      c.fill();
+      c.shadowBlur = 0;
+      if (isHead) {
+        c.fillStyle = '#fff';
+        c.beginPath();
+        c.arc(sg.x * s + s * 0.65, sg.y * s + s * 0.35, s * 0.12, 0, Math.PI * 2);
+        c.arc(sg.x * s + s * 0.65, sg.y * s + s * 0.65, s * 0.12, 0, Math.PI * 2);
+        c.fill();
+        c.fillStyle = '#222';
+        c.beginPath();
+        c.arc(sg.x * s + s * 0.7, sg.y * s + s * 0.35, s * 0.06, 0, Math.PI * 2);
+        c.arc(sg.x * s + s * 0.7, sg.y * s + s * 0.65, s * 0.06, 0, Math.PI * 2);
+        c.fill();
+      }
+    }
+  }
+
+  function drawFoodPreview(c, item, size) {
+    const cx = size / 2, cy = size / 2 + size * 0.05, r = size * 0.32;
+    c.save();
+    switch (item.type) {
+      case 'apple':
+      case 'golden': {
+        const g = c.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+        g.addColorStop(0, item.highlight); g.addColorStop(1, item.color);
+        c.fillStyle = g;
+        if (item.sparkle) c.shadowColor = '#FFD700', c.shadowBlur = 10;
+        c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
+        c.shadowBlur = 0;
+        c.fillStyle = '#6BCB77';
+        c.beginPath(); c.ellipse(cx + r * 0.3, cy - r * 1, r * 0.3, r * 0.55, -0.5, 0, Math.PI * 2); c.fill();
+        c.strokeStyle = '#8A5A2B'; c.lineWidth = 2;
+        c.beginPath(); c.moveTo(cx, cy - r * 0.7); c.quadraticCurveTo(cx + r * 0.2, cy - r * 1.1, cx + r * 0.4, cy - r * 1.2); c.stroke();
+        break;
+      }
+      case 'banana': {
+        c.fillStyle = item.color;
+        c.beginPath();
+        c.ellipse(cx, cy, r * 1.1, r * 0.45, 0.4, 0, Math.PI * 2);
+        c.fill();
+        c.strokeStyle = item.highlight; c.lineWidth = 3;
+        c.beginPath();
+        c.ellipse(cx, cy - 2, r * 1.05, r * 0.38, 0.4, 0, Math.PI);
+        c.stroke();
+        break;
+      }
+      case 'grape': {
+        const offs = [[-r * 0.35, -r * 0.2], [r * 0.35, -r * 0.2], [0, 0], [-r * 0.35, r * 0.3], [r * 0.35, r * 0.3], [0, r * 0.55]];
+        offs.forEach(([dx, dy], i) => {
+          c.fillStyle = i % 2 ? item.color : item.highlight;
+          c.beginPath(); c.arc(cx + dx, cy + dy, r * 0.32, 0, Math.PI * 2); c.fill();
+        });
+        break;
+      }
+      case 'strawberry': {
+        c.fillStyle = item.color;
+        c.beginPath();
+        c.moveTo(cx - r * 0.9, cy - r * 0.2);
+        c.quadraticCurveTo(cx, cy + r * 1.1, cx + r * 0.9, cy - r * 0.2);
+        c.quadraticCurveTo(cx, cy - r * 0.5, cx - r * 0.9, cy - r * 0.2);
+        c.fill();
+        c.fillStyle = item.highlight;
+        for (let i = 0; i < 6; i++) {
+          const sx = cx - r * 0.6 + (i % 3) * r * 0.6;
+          const sy = cy + r * 0.05 + Math.floor(i / 3) * r * 0.4;
+          c.beginPath(); c.arc(sx, sy, r * 0.05, 0, Math.PI * 2); c.fill();
+        }
+        c.fillStyle = '#4CAF50';
+        c.beginPath();
+        c.moveTo(cx - r * 0.6, cy - r * 0.35);
+        c.lineTo(cx, cy - r * 0.9);
+        c.lineTo(cx + r * 0.6, cy - r * 0.35);
+        c.closePath();
+        c.fill();
+        break;
+      }
+      case 'orange': {
+        const g = c.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+        g.addColorStop(0, item.highlight); g.addColorStop(1, item.color);
+        c.fillStyle = g; c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
+        c.strokeStyle = 'rgba(255,255,255,0.4)'; c.lineWidth = 2;
+        for (let i = 0; i < 6; i++) {
+          c.beginPath();
+          c.moveTo(cx, cy);
+          c.lineTo(cx + Math.cos(i * Math.PI / 3) * r * 0.85, cy + Math.sin(i * Math.PI / 3) * r * 0.85);
+          c.stroke();
+        }
+        break;
+      }
+      case 'watermelon': {
+        c.fillStyle = item.color;
+        c.beginPath(); c.arc(cx, cy, r, Math.PI, 0); c.fill();
+        c.fillStyle = '#D32F2F';
+        c.beginPath(); c.arc(cx, cy, r * 0.82, Math.PI, 0); c.fill();
+        c.fillStyle = '#FFEBEE';
+        for (let i = 0; i < 5; i++) {
+          const a = Math.PI + (i + 1) * Math.PI / 6;
+          c.beginPath(); c.arc(cx + Math.cos(a) * r * 0.5, cy + Math.sin(a) * r * 0.5, r * 0.05, 0, Math.PI * 2); c.fill();
+        }
+        break;
+      }
+      case 'cherry': {
+        [[-r * 0.4, r * 0.2], [r * 0.4, r * 0.2]].forEach(([dx, dy]) => {
+          const g = c.createRadialGradient(cx + dx - r * 0.15, cy + dy - r * 0.15, r * 0.05, cx + dx, cy + dy, r * 0.55);
+          g.addColorStop(0, item.highlight); g.addColorStop(1, item.color);
+          c.fillStyle = g; c.beginPath(); c.arc(cx + dx, cy + dy, r * 0.55, 0, Math.PI * 2); c.fill();
+        });
+        c.strokeStyle = '#2E7D32'; c.lineWidth = 2;
+        c.beginPath();
+        c.moveTo(cx - r * 0.4, cy - r * 0.35);
+        c.quadraticCurveTo(cx, cy - r * 1.1, cx + r * 0.4, cy - r * 0.35);
+        c.stroke();
+        break;
+      }
+      case 'pineapple': {
+        c.fillStyle = item.color;
+        roundRect(c, cx - r * 0.7, cy - r * 0.3, r * 1.4, r * 1.1, r * 0.2);
+        c.fill();
+        c.strokeStyle = 'rgba(120,80,0,0.4)'; c.lineWidth = 1.5;
+        for (let i = 0; i < 4; i++) {
+          c.beginPath();
+          c.moveTo(cx - r * 0.65, cy - r * 0.1 + i * r * 0.3);
+          c.lineTo(cx + r * 0.65, cy - r * 0.1 + i * r * 0.3);
+          c.stroke();
+        }
+        c.fillStyle = '#2E7D32';
+        for (let i = 0; i < 5; i++) {
+          const lx = cx - r * 0.5 + i * r * 0.25;
+          c.beginPath();
+          c.moveTo(lx, cy - r * 0.3);
+          c.lineTo(lx - r * 0.1, cy - r * 0.85);
+          c.lineTo(lx + r * 0.1, cy - r * 0.3);
+          c.fill();
+        }
+        break;
+      }
+      case 'kiwi': {
+        c.fillStyle = item.color;
+        c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
+        c.fillStyle = '#F1F8E9';
+        c.beginPath(); c.arc(cx, cy, r * 0.82, 0, Math.PI * 2); c.fill();
+        c.fillStyle = item.color;
+        for (let i = 0; i < 12; i++) {
+          const a = i * Math.PI / 6;
+          c.beginPath(); c.ellipse(cx + Math.cos(a) * r * 0.45, cy + Math.sin(a) * r * 0.45, r * 0.04, r * 0.08, a, 0, Math.PI * 2); c.fill();
+        }
+        c.fillStyle = '#ffffff'; c.beginPath(); c.arc(cx, cy, r * 0.1, 0, Math.PI * 2); c.fill();
+        break;
+      }
+      case 'peach': {
+        const g = c.createRadialGradient(cx - r * 0.2, cy - r * 0.2, r * 0.1, cx, cy, r);
+        g.addColorStop(0, item.highlight); g.addColorStop(1, item.color);
+        c.fillStyle = g;
+        c.beginPath(); c.arc(cx - r * 0.25, cy, r * 0.75, 0, Math.PI * 2); c.fill();
+        c.beginPath(); c.arc(cx + r * 0.25, cy, r * 0.75, 0, Math.PI * 2); c.fill();
+        c.strokeStyle = '#C62828'; c.lineWidth = 1.5;
+        c.beginPath(); c.moveTo(cx, cy - r * 0.65); c.lineTo(cx, cy - r * 0.9); c.stroke();
+        break;
+      }
+      case 'diamond': {
+        c.fillStyle = item.color;
+        if (item.sparkle) c.shadowColor = '#4DD0E1', c.shadowBlur = 10;
+        c.beginPath();
+        c.moveTo(cx, cy - r);
+        c.lineTo(cx + r, cy - r * 0.1);
+        c.lineTo(cx, cy + r);
+        c.lineTo(cx - r, cy - r * 0.1);
+        c.closePath();
+        c.fill();
+        c.shadowBlur = 0;
+        c.strokeStyle = item.highlight; c.lineWidth = 2;
+        c.beginPath(); c.moveTo(cx - r * 0.5, cy - r * 0.1); c.lineTo(cx + r * 0.5, cy - r * 0.1); c.stroke();
+        c.beginPath(); c.moveTo(cx, cy - r); c.lineTo(cx, cy + r); c.stroke();
+        break;
+      }
+      default: {
+        c.fillStyle = item.color; c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
+      }
+    }
+    c.restore();
+  }
+
+  function drawAccessoryPreview(c, item, size) {
+    const cx = size / 2, cy = size / 2 + size * 0.1;
+    // Голова змейки под аксессуаром
+    c.fillStyle = '#6BCB77';
+    c.beginPath(); c.arc(cx, cy, size * 0.32, 0, Math.PI * 2); c.fill();
+    if (item.type === 'none') return;
+    c.save();
+    const col = item.color || '#FFD700';
+    switch (item.type) {
+      case 'hat':
+      case 'party_hat': {
+        c.fillStyle = col;
+        if (item.type === 'party_hat') {
+          c.beginPath();
+          c.moveTo(cx - size * 0.25, cy - size * 0.1);
+          c.lineTo(cx + size * 0.05, cy - size * 0.45);
+          c.lineTo(cx + size * 0.25, cy - size * 0.1);
+          c.fill();
+          c.fillStyle = '#FFEB3B'; c.beginPath(); c.arc(cx + size * 0.05, cy - size * 0.45, size * 0.05, 0, Math.PI * 2); c.fill();
+        } else {
+          roundRect(c, cx - size * 0.3, cy - size * 0.35, size * 0.6, size * 0.25, size * 0.05);
+          c.fill();
+          roundRect(c, cx - size * 0.36, cy - size * 0.12, size * 0.72, size * 0.08, size * 0.02);
+          c.fill();
+        }
+        break;
+      }
+      case 'crown': {
+        c.fillStyle = col;
+        c.shadowColor = '#FFA000'; c.shadowBlur = 6;
+        c.beginPath();
+        c.moveTo(cx - size * 0.32, cy - size * 0.1);
+        c.lineTo(cx - size * 0.32, cy - size * 0.3);
+        c.lineTo(cx - size * 0.16, cy - size * 0.2);
+        c.lineTo(cx, cy - size * 0.42);
+        c.lineTo(cx + size * 0.16, cy - size * 0.2);
+        c.lineTo(cx + size * 0.32, cy - size * 0.3);
+        c.lineTo(cx + size * 0.32, cy - size * 0.1);
+        c.closePath();
+        c.fill();
+        c.shadowBlur = 0;
+        c.fillStyle = '#E53935'; c.beginPath(); c.arc(cx, cy - size * 0.32, size * 0.04, 0, Math.PI * 2); c.fill();
+        c.fillStyle = '#1E88E5'; c.beginPath(); c.arc(cx - size * 0.2, cy - size * 0.2, size * 0.03, 0, Math.PI * 2); c.fill();
+        c.fillStyle = '#43A047'; c.beginPath(); c.arc(cx + size * 0.2, cy - size * 0.2, size * 0.03, 0, Math.PI * 2); c.fill();
+        break;
+      }
+      case 'glasses':
+      case 'glasses_nerd': {
+        c.strokeStyle = col; c.lineWidth = item.type === 'glasses' ? 4 : 2;
+        c.fillStyle = item.type === 'glasses' ? '#111' : 'rgba(255,255,255,0.6)';
+        const rad = size * 0.14;
+        c.beginPath(); c.arc(cx - size * 0.16, cy - size * 0.02, rad, 0, Math.PI * 2); c.fill(); c.stroke();
+        c.beginPath(); c.arc(cx + size * 0.16, cy - size * 0.02, rad, 0, Math.PI * 2); c.fill(); c.stroke();
+        c.beginPath(); c.moveTo(cx - size * 0.16 + rad, cy - size * 0.02); c.lineTo(cx + size * 0.16 - rad, cy - size * 0.02); c.stroke();
+        break;
+      }
+      case 'bow': {
+        c.fillStyle = col;
+        c.beginPath();
+        c.moveTo(cx - size * 0.08, cy - size * 0.18);
+        c.lineTo(cx - size * 0.36, cy - size * 0.3);
+        c.lineTo(cx - size * 0.36, cy - size * 0.05);
+        c.closePath();
+        c.fill();
+        c.beginPath();
+        c.moveTo(cx + size * 0.08, cy - size * 0.18);
+        c.lineTo(cx + size * 0.36, cy - size * 0.3);
+        c.lineTo(cx + size * 0.36, cy - size * 0.05);
+        c.closePath();
+        c.fill();
+        c.fillStyle = '#AD1457';
+        roundRect(c, cx - size * 0.06, cy - size * 0.26, size * 0.12, size * 0.14, size * 0.03);
+        c.fill();
+        break;
+      }
+      case 'flower': {
+        for (let i = 0; i < 6; i++) {
+          c.fillStyle = i % 2 ? col : '#FCE4EC';
+          const a = i * Math.PI / 3;
+          c.beginPath();
+          c.arc(cx + Math.cos(a) * size * 0.12, cy - size * 0.3 + Math.sin(a) * size * 0.12, size * 0.08, 0, Math.PI * 2);
+          c.fill();
+        }
+        c.fillStyle = '#FFEB3B'; c.beginPath(); c.arc(cx, cy - size * 0.3, size * 0.08, 0, Math.PI * 2); c.fill();
+        break;
+      }
+      case 'headphones': {
+        c.strokeStyle = col; c.lineWidth = 5;
+        c.beginPath();
+        c.arc(cx, cy - size * 0.2, size * 0.32, Math.PI, 0);
+        c.stroke();
+        c.fillStyle = col;
+        roundRect(c, cx - size * 0.36, cy - size * 0.25, size * 0.1, size * 0.24, size * 0.03);
+        c.fill();
+        roundRect(c, cx + size * 0.26, cy - size * 0.25, size * 0.1, size * 0.24, size * 0.03);
+        c.fill();
+        break;
+      }
+      case 'wizard_hat': {
+        c.fillStyle = col;
+        c.beginPath();
+        c.moveTo(cx - size * 0.3, cy - size * 0.12);
+        c.lineTo(cx + size * 0.3, cy - size * 0.12);
+        c.lineTo(cx + size * 0.05, cy - size * 0.48);
+        c.closePath();
+        c.fill();
+        c.fillStyle = '#FFD700';
+        for (let i = 0; i < 3; i++) {
+          c.beginPath();
+          c.arc(cx - size * 0.1 + i * size * 0.1, cy - size * 0.35, size * 0.025, 0, Math.PI * 2);
+          c.fill();
+        }
+        break;
+      }
+      case 'viking': {
+        c.fillStyle = col;
+        roundRect(c, cx - size * 0.32, cy - size * 0.35, size * 0.64, size * 0.32, size * 0.08);
+        c.fill();
+        c.fillStyle = '#757575';
+        [[-1, -1], [1, -1]].forEach(([sx, sy]) => {
+          c.beginPath();
+          c.moveTo(cx + sx * size * 0.25, cy - size * 0.35);
+          c.lineTo(cx + sx * size * 0.38, cy - size * 0.55);
+          c.lineTo(cx + sx * size * 0.15, cy - size * 0.35);
+          c.fill();
+        });
+        c.fillStyle = '#FF8A65';
+        roundRect(c, cx - size * 0.06, cy - size * 0.26, size * 0.12, size * 0.12, size * 0.02);
+        c.fill();
+        break;
+      }
+    }
+    c.restore();
+  }
+
+  function drawBackgroundPreview(c, item, size) {
+    if (item.type === 'solid') {
+      c.fillStyle = item.color; c.fillRect(0, 0, size, size);
+      c.fillStyle = item.alt || item.color;
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+        if ((x + y) % 2 === 0) c.fillRect(x * (size / 8), y * (size / 8), size / 8, size / 8);
+      }
+    } else {
+      const g = c.createLinearGradient(0, 0, 0, size);
+      g.addColorStop(0, item.color);
+      g.addColorStop(0.5, item.alt || item.color);
+      if (item.alt2) g.addColorStop(1, item.alt2); else g.addColorStop(1, item.color);
+      c.fillStyle = g; c.fillRect(0, 0, size, size);
+    }
+    // Намёк на сетку
+    c.fillStyle = 'rgba(255,255,255,0.06)';
+    for (let y = 0; y < 6; y++) for (let x = 0; x < 6; x++) {
+      if ((x + y) % 2 === 0) c.fillRect(x * (size / 6), y * (size / 6), size / 6, size / 6);
+    }
+  }
+
+  function renderPreview(canvasEl, category, item) {
+    const c = canvasEl.getContext('2d');
+    const size = 120;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvasEl.width = size * dpr; canvasEl.height = size * dpr;
+    canvasEl.style.width = size + 'px'; canvasEl.style.height = size + 'px';
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, size, size);
+    switch (category) {
+      case 'snake': drawSnakePreview(c, item, size); break;
+      case 'food': drawFoodPreview(c, item, size); break;
+      case 'accessory': drawAccessoryPreview(c, item, size); break;
+      case 'background': drawBackgroundPreview(c, item, size); break;
+    }
+  }
+
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.lineTo(x + w - r, y);
+    c.quadraticCurveTo(x + w, y, x + w, y + r);
+    c.lineTo(x + w, y + h - r);
+    c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    c.lineTo(x + r, y + h);
+    c.quadraticCurveTo(x, y + h, x, y + h - r);
+    c.lineTo(x, y + r);
+    c.quadraticCurveTo(x, y, x + r, y);
+    c.closePath();
+  }
+
+  // ========== SHOP: Рендер списка товаров ==========
+  function renderShopItems() {
+    const cat = currentShopCategory;
+    const items = SHOP_CATALOG[cat] || [];
+    shopItemsEl.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    items.forEach((item) => {
+      const owned = isOwned(item.id);
+      const equipped = isEquipped(cat, item.id);
+      const row = document.createElement('div');
+      row.className = 'shop-item' + (owned ? ' owned' : '') + (equipped ? ' equipped' : '');
+
+      const prev = document.createElement('div');
+      prev.className = 'shop-preview';
+      if (cat === 'background') {
+        const bgDiv = document.createElement('div');
+        bgDiv.className = 'shop-preview-bg';
+        const tmpCanvas = document.createElement('canvas');
+        renderPreview(tmpCanvas, 'background', item);
+        // Получаем фон через canvas
+        const styleItem = item;
+        if (styleItem.type === 'solid') {
+          bgDiv.style.background = styleItem.color;
+        } else {
+          let gr = `linear-gradient(180deg, ${styleItem.color} 0%, ${styleItem.alt || styleItem.color} 50%`;
+          if (styleItem.alt2) gr += `, ${styleItem.alt2} 100%)`; else gr += ', ' + styleItem.color + ' 100%)';
+          bgDiv.style.background = gr;
+        }
+        prev.appendChild(bgDiv);
+        const miniC = document.createElement('canvas');
+        miniC.style.position = 'relative';
+        miniC.style.zIndex = '1';
+        miniC.style.width = '70%'; miniC.style.height = '70%';
+        renderPreview(miniC, 'snake', getEquipped('snake'));
+        prev.appendChild(miniC);
+      } else {
+        const cvs = document.createElement('canvas');
+        renderPreview(cvs, cat, item);
+        prev.appendChild(cvs);
+      }
+
+      const name = document.createElement('div');
+      name.className = 'shop-name';
+      name.textContent = item.name;
+
+      const btnRow = document.createElement('div');
+      btnRow.style.width = '100%';
+      btnRow.style.display = 'flex';
+      btnRow.style.flexDirection = 'column';
+      btnRow.style.gap = '4px';
+
+      if (item.price > 0 || owned) {
+        const priceRow = document.createElement('div');
+        priceRow.className = 'shop-price-row';
+        if (!owned) {
+          const coinSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          coinSvg.setAttribute('viewBox', '0 0 24 24');
+          coinSvg.setAttribute('width', '14');
+          coinSvg.setAttribute('height', '14');
+          coinSvg.innerHTML = '<circle cx="12" cy="12" r="9" fill="#FFD700" stroke="#D48806" stroke-width="1.5"/><text x="12" y="16" text-anchor="middle" font-size="10" font-weight="900" fill="#8B5A00">$</text>';
+          const price = document.createElement('span');
+          price.className = 'shop-price';
+          price.textContent = item.price;
+          priceRow.append(coinSvg, price);
+          btnRow.appendChild(priceRow);
+        }
+      }
+
+      const btn = document.createElement('button');
+      btn.className = 'shop-buy-btn' + (owned ? ' owned' : '') + (equipped ? ' equipped' : '');
+      if (!owned) {
+        btn.textContent = 'Купить';
+        btn.disabled = coins < item.price;
+      } else if (equipped) {
+        btn.textContent = 'Экипирован';
+      } else {
+        btn.textContent = 'Надеть';
+      }
+      btn.addEventListener('click', () => {
+        if (!owned) {
+          const r = buyItem(item);
+          if (r.success) {
+            sfx.ui();
+            // После покупки сразу экипируем
+            equipItem(cat, item);
+            renderShopItems();
+          } else {
+            btn.animate(
+              [{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(0)' }],
+              { duration: 260 }
+            );
+          }
+        } else if (!equipped) {
+          sfx.ui();
+          equipItem(cat, item);
+          renderShopItems();
+        }
+      });
+
+      btnRow.appendChild(btn);
+      row.append(prev, name, btnRow);
+      frag.appendChild(row);
+    });
+    shopItemsEl.appendChild(frag);
+  }
+
+  function shopOpen() {
+    shopModal.classList.add('active');
+    renderShopItems();
+    updateCoinsUI();
+  }
+
+  function shopClose() {
+    shopModal.classList.remove('active');
+  }
+
   // ---------- Utility ----------
   // Скорость движения. В «Бесконечной» — постоянная, задаётся чипом скорости;
   // в «Гонке» — плавное ускорение: первые яблоки почти не ускоряют, потом нарастает.
@@ -435,14 +1095,32 @@
   }
 
   function drawBoard() {
-    ctx.fillStyle = COLORS.board;
-    ctx.fillRect(0, 0, boardSize, boardSize);
+    const bg = getEquipped('background');
     const s = cellSize;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
-    for (let y = 0; y < GRID; y++) {
-      for (let x = 0; x < GRID; x++) {
-        if ((x + y) % 2 === 0) {
-          ctx.fillRect(x * s, y * s, s, s);
+    if (bg.type === 'solid') {
+      ctx.fillStyle = bg.color;
+      ctx.fillRect(0, 0, boardSize, boardSize);
+      ctx.fillStyle = bg.alt || bg.color;
+      for (let y = 0; y < GRID; y++) {
+        for (let x = 0; x < GRID; x++) {
+          if ((x + y) % 2 === 0) {
+            ctx.fillRect(x * s, y * s, s, s);
+          }
+        }
+      }
+    } else {
+      const g = ctx.createLinearGradient(0, 0, 0, boardSize);
+      g.addColorStop(0, bg.color);
+      g.addColorStop(0.5, bg.alt || bg.color);
+      if (bg.alt2) g.addColorStop(1, bg.alt2); else g.addColorStop(1, bg.color);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, boardSize, boardSize);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      for (let y = 0; y < GRID; y++) {
+        for (let x = 0; x < GRID; x++) {
+          if ((x + y) % 2 === 0) {
+            ctx.fillRect(x * s, y * s, s, s);
+          }
         }
       }
     }
@@ -455,24 +1133,188 @@
     const cy = food.y * s + s / 2;
     const r = s * 0.36;
     const pulse = 1 + 0.08 * Math.sin(animTime / 300);
+    const foodItem = getEquipped('food');
 
     ctx.save();
     ctx.translate(cx, cy);
     ctx.scale(pulse, pulse);
     ctx.translate(-cx, -cy);
 
-    const grad = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
-    grad.addColorStop(0, COLORS.foodHighlight);
-    grad.addColorStop(1, COLORS.food);
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = grad;
-    ctx.fill();
+    const color = foodItem.color || COLORS.food;
+    const hi = foodItem.highlight || COLORS.foodHighlight;
+    const type = foodItem.type || 'apple';
+    const sparkle = !!foodItem.sparkle;
 
-    ctx.beginPath();
-    ctx.ellipse(cx + r * 0.3, cy - r * 0.95, r * 0.35, r * 0.55, 0, 0, Math.PI * 2);
-    ctx.fillStyle = COLORS.body;
-    ctx.fill();
+    const drawLeaf = () => {
+      ctx.beginPath();
+      ctx.ellipse(cx + r * 0.3, cy - r * 1, r * 0.35, r * 0.55, -0.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#6BCB77';
+      ctx.fill();
+    };
+
+    if (sparkle) { ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 10; }
+
+    switch (type) {
+      case 'banana': {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, r * 1.1, r * 0.45, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = hi; ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy - 2, r * 1.05, r * 0.38, 0.4, 0, Math.PI);
+        ctx.stroke();
+        break;
+      }
+      case 'grape': {
+        const offs = [[-r * 0.35, -r * 0.2], [r * 0.35, -r * 0.2], [0, 0], [-r * 0.35, r * 0.3], [r * 0.35, r * 0.3], [0, r * 0.55]];
+        offs.forEach(([dx, dy], i) => {
+          ctx.fillStyle = i % 2 ? color : hi;
+          ctx.beginPath(); ctx.arc(cx + dx, cy + dy, r * 0.32, 0, Math.PI * 2); ctx.fill();
+        });
+        drawLeaf();
+        break;
+      }
+      case 'strawberry': {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(cx - r * 0.9, cy - r * 0.2);
+        ctx.quadraticCurveTo(cx, cy + r * 1.1, cx + r * 0.9, cy - r * 0.2);
+        ctx.quadraticCurveTo(cx, cy - r * 0.5, cx - r * 0.9, cy - r * 0.2);
+        ctx.fill();
+        ctx.fillStyle = hi;
+        for (let i = 0; i < 6; i++) {
+          const sx = cx - r * 0.6 + (i % 3) * r * 0.6;
+          const sy = cy + r * 0.05 + Math.floor(i / 3) * r * 0.4;
+          ctx.beginPath(); ctx.arc(sx, sy, r * 0.05, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = '#4CAF50';
+        ctx.beginPath();
+        ctx.moveTo(cx - r * 0.6, cy - r * 0.35);
+        ctx.lineTo(cx, cy - r * 0.9);
+        ctx.lineTo(cx + r * 0.6, cy - r * 0.35);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
+      case 'orange': {
+        const grad = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+        grad.addColorStop(0, hi); grad.addColorStop(1, color);
+        ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
+        for (let i = 0; i < 6; i++) {
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(cx + Math.cos(i * Math.PI / 3) * r * 0.85, cy + Math.sin(i * Math.PI / 3) * r * 0.85);
+          ctx.stroke();
+        }
+        drawLeaf();
+        break;
+      }
+      case 'watermelon': {
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(cx, cy, r, Math.PI, 0); ctx.fill();
+        ctx.fillStyle = '#D32F2F';
+        ctx.beginPath(); ctx.arc(cx, cy, r * 0.82, Math.PI, 0); ctx.fill();
+        ctx.fillStyle = '#FFEBEE';
+        for (let i = 0; i < 5; i++) {
+          const a = Math.PI + (i + 1) * Math.PI / 6;
+          ctx.beginPath(); ctx.arc(cx + Math.cos(a) * r * 0.5, cy + Math.sin(a) * r * 0.5, r * 0.05, 0, Math.PI * 2); ctx.fill();
+        }
+        break;
+      }
+      case 'cherry': {
+        [[-r * 0.4, r * 0.2], [r * 0.4, r * 0.2]].forEach(([dx, dy]) => {
+          const g = ctx.createRadialGradient(cx + dx - r * 0.15, cy + dy - r * 0.15, r * 0.05, cx + dx, cy + dy, r * 0.55);
+          g.addColorStop(0, hi); g.addColorStop(1, color);
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx + dx, cy + dy, r * 0.55, 0, Math.PI * 2); ctx.fill();
+        });
+        ctx.strokeStyle = '#2E7D32'; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cx - r * 0.4, cy - r * 0.35);
+        ctx.quadraticCurveTo(cx, cy - r * 1.1, cx + r * 0.4, cy - r * 0.35);
+        ctx.stroke();
+        break;
+      }
+      case 'pineapple': {
+        ctx.fillStyle = color;
+        roundRect(ctx, cx - r * 0.7, cy - r * 0.3, r * 1.4, r * 1.1, r * 0.2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(120,80,0,0.4)'; ctx.lineWidth = 1.5;
+        for (let i = 0; i < 4; i++) {
+          ctx.beginPath();
+          ctx.moveTo(cx - r * 0.65, cy - r * 0.1 + i * r * 0.3);
+          ctx.lineTo(cx + r * 0.65, cy - r * 0.1 + i * r * 0.3);
+          ctx.stroke();
+        }
+        ctx.fillStyle = '#2E7D32';
+        for (let i = 0; i < 5; i++) {
+          const lx = cx - r * 0.5 + i * r * 0.25;
+          ctx.beginPath();
+          ctx.moveTo(lx, cy - r * 0.3);
+          ctx.lineTo(lx - r * 0.1, cy - r * 0.85);
+          ctx.lineTo(lx + r * 0.1, cy - r * 0.3);
+          ctx.fill();
+        }
+        break;
+      }
+      case 'kiwi': {
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#F1F8E9';
+        ctx.beginPath(); ctx.arc(cx, cy, r * 0.82, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = color;
+        for (let i = 0; i < 12; i++) {
+          const a = i * Math.PI / 6;
+          ctx.beginPath(); ctx.ellipse(cx + Math.cos(a) * r * 0.45, cy + Math.sin(a) * r * 0.45, r * 0.04, r * 0.08, a, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(cx, cy, r * 0.1, 0, Math.PI * 2); ctx.fill();
+        break;
+      }
+      case 'peach': {
+        const g = ctx.createRadialGradient(cx - r * 0.2, cy - r * 0.2, r * 0.1, cx, cy, r);
+        g.addColorStop(0, hi); g.addColorStop(1, color);
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(cx - r * 0.25, cy, r * 0.75, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx + r * 0.25, cy, r * 0.75, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#C62828'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(cx, cy - r * 0.65); ctx.lineTo(cx, cy - r * 0.9); ctx.stroke();
+        drawLeaf();
+        break;
+      }
+      case 'diamond': {
+        ctx.fillStyle = color;
+        if (sparkle) { ctx.shadowColor = '#4DD0E1'; ctx.shadowBlur = 12; }
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - r);
+        ctx.lineTo(cx + r, cy - r * 0.1);
+        ctx.lineTo(cx, cy + r);
+        ctx.lineTo(cx - r, cy - r * 0.1);
+        ctx.closePath();
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = hi; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx - r * 0.5, cy - r * 0.1); ctx.lineTo(cx + r * 0.5, cy - r * 0.1); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r); ctx.stroke();
+        break;
+      }
+      case 'golden':
+      case 'apple':
+      default: {
+        const grad = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+        grad.addColorStop(0, hi);
+        grad.addColorStop(1, color);
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        drawLeaf();
+        ctx.strokeStyle = '#8A5A2B'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx, cy - r * 0.7); ctx.quadraticCurveTo(cx + r * 0.2, cy - r * 1.1, cx + r * 0.4, cy - r * 1.2); ctx.stroke();
+        break;
+      }
+    }
 
     ctx.restore();
   }
@@ -491,6 +1333,17 @@
     const s = cellSize;
     const n = snake.length;
     const width = s * 0.86;
+    const skin = getEquipped('snake');
+    const acc = getEquipped('accessory');
+
+    const bodyColor = (k) => {
+      if (skin.rainbow) {
+        const phase = (animTime / 2000 + k * 0.2) % 1;
+        return `hsl(${Math.floor(phase * 360)}, 80%, 60%)`;
+      }
+      if (k === -1) return skin.head || COLORS.head;
+      return k % 2 === 0 ? (skin.body || COLORS.body) : (skin.bodyDark || skin.body || COLORS.bodyDark);
+    };
 
     const pts = [];
     for (let i = 0; i < n; i++) pts.push(segCenter(i, t));
@@ -504,8 +1357,10 @@
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
+      if (skin.glow) { ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 8; }
+
       if (n === 2) {
-        ctx.strokeStyle = COLORS.body;
+        ctx.strokeStyle = bodyColor(0);
         ctx.lineWidth = width;
         ctx.beginPath();
         ctx.moveTo(pts[1].x, pts[1].y);
@@ -527,7 +1382,7 @@
             control = pts[k];
             end = mids[k];
           }
-          ctx.strokeStyle = k % 2 === 0 ? COLORS.body : COLORS.bodyDark;
+          ctx.strokeStyle = bodyColor(k);
           ctx.lineWidth = width;
           ctx.beginPath();
           ctx.moveTo(start.x, start.y);
@@ -535,13 +1390,16 @@
           ctx.stroke();
         }
       }
+      ctx.shadowBlur = 0;
     }
 
     const h = pts[0];
-    ctx.fillStyle = COLORS.head;
+    if (skin.glow) { ctx.shadowColor = '#FFD700'; ctx.shadowBlur = 12; }
+    ctx.fillStyle = bodyColor(-1);
     ctx.beginPath();
     ctx.arc(h.x, h.y, width / 2, 0, Math.PI * 2);
     ctx.fill();
+    ctx.shadowBlur = 0;
 
     const ex = dir.x * s * 0.16;
     const ey = dir.y * s * 0.16;
@@ -559,6 +1417,156 @@
       ctx.arc(exx + dir.x * eyeR * 0.4, eyy + dir.y * eyeR * 0.4, eyeR * 0.5, 0, Math.PI * 2);
       ctx.fillStyle = COLORS.pupil;
       ctx.fill();
+    }
+
+    // ============ Аксессуар на голове ============
+    if (acc && acc.type !== 'none') {
+      const col = acc.color || '#FFD700';
+      // Сдвиг аксессуара вверх относительно головы (в противоположную сторону движения)
+      const offX = -dir.x * s * 0.35;
+      const offY = -dir.y * s * 0.35;
+      const ax = h.x + offX;
+      const ay = h.y + offY;
+      const sz = s * 0.55;
+      ctx.save();
+      ctx.translate(ax, ay);
+
+      // Угол направления (для поворота аксессуара)
+      let rotAng = 0;
+      if (dir.x === 1) rotAng = 0;
+      else if (dir.x === -1) rotAng = Math.PI;
+      else if (dir.y === -1) rotAng = -Math.PI / 2;
+      else if (dir.y === 1) rotAng = Math.PI / 2;
+      ctx.rotate(rotAng);
+
+      switch (acc.type) {
+        case 'hat':
+        case 'party_hat': {
+          ctx.fillStyle = col;
+          if (acc.type === 'party_hat') {
+            ctx.beginPath();
+            ctx.moveTo(-sz * 0.32, sz * 0.08);
+            ctx.lineTo(sz * 0.08, -sz * 0.5);
+            ctx.lineTo(sz * 0.32, sz * 0.08);
+            ctx.fill();
+            ctx.fillStyle = '#FFEB3B';
+            ctx.beginPath(); ctx.arc(sz * 0.08, -sz * 0.5, sz * 0.1, 0, Math.PI * 2); ctx.fill();
+          } else {
+            roundRect(ctx, -sz * 0.38, -sz * 0.35, sz * 0.76, sz * 0.3, sz * 0.08);
+            ctx.fill();
+            roundRect(ctx, -sz * 0.46, -sz * 0.08, sz * 0.92, sz * 0.1, sz * 0.02);
+            ctx.fill();
+          }
+          break;
+        }
+        case 'crown': {
+          ctx.fillStyle = col;
+          ctx.shadowColor = '#FFA000'; ctx.shadowBlur = 8;
+          ctx.beginPath();
+          ctx.moveTo(-sz * 0.42, sz * 0.12);
+          ctx.lineTo(-sz * 0.42, -sz * 0.15);
+          ctx.lineTo(-sz * 0.22, -sz * 0.02);
+          ctx.lineTo(0, -sz * 0.32);
+          ctx.lineTo(sz * 0.22, -sz * 0.02);
+          ctx.lineTo(sz * 0.42, -sz * 0.15);
+          ctx.lineTo(sz * 0.42, sz * 0.12);
+          ctx.closePath();
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = '#E53935'; ctx.beginPath(); ctx.arc(0, -sz * 0.2, sz * 0.06, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#1E88E5'; ctx.beginPath(); ctx.arc(-sz * 0.26, -sz * 0.05, sz * 0.05, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#43A047'; ctx.beginPath(); ctx.arc(sz * 0.26, -sz * 0.05, sz * 0.05, 0, Math.PI * 2); ctx.fill();
+          break;
+        }
+        case 'glasses':
+        case 'glasses_nerd': {
+          ctx.strokeStyle = col; ctx.lineWidth = acc.type === 'glasses' ? 4 : 2;
+          ctx.fillStyle = acc.type === 'glasses' ? 'rgba(10,10,10,0.85)' : 'rgba(255,255,255,0.55)';
+          const rad = sz * 0.18;
+          const offs = sz * 0.24;
+          ctx.beginPath(); ctx.arc(-offs, sz * 0.02, rad, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.beginPath(); ctx.arc(offs, sz * 0.02, rad, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(-offs + rad, sz * 0.02); ctx.lineTo(offs - rad, sz * 0.02); ctx.stroke();
+          break;
+        }
+        case 'bow': {
+          ctx.fillStyle = col;
+          ctx.beginPath();
+          ctx.moveTo(-sz * 0.1, -sz * 0.1);
+          ctx.lineTo(-sz * 0.46, -sz * 0.24);
+          ctx.lineTo(-sz * 0.46, sz * 0.06);
+          ctx.closePath();
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(sz * 0.1, -sz * 0.1);
+          ctx.lineTo(sz * 0.46, -sz * 0.24);
+          ctx.lineTo(sz * 0.46, sz * 0.06);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = '#AD1457';
+          roundRect(ctx, -sz * 0.08, -sz * 0.18, sz * 0.16, sz * 0.18, sz * 0.04);
+          ctx.fill();
+          break;
+        }
+        case 'flower': {
+          for (let i = 0; i < 6; i++) {
+            ctx.fillStyle = i % 2 ? col : '#FCE4EC';
+            const a = i * Math.PI / 3;
+            ctx.beginPath();
+            ctx.arc(Math.cos(a) * sz * 0.16, -sz * 0.22 + Math.sin(a) * sz * 0.16, sz * 0.11, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.fillStyle = '#FFEB3B';
+          ctx.beginPath(); ctx.arc(0, -sz * 0.22, sz * 0.1, 0, Math.PI * 2); ctx.fill();
+          break;
+        }
+        case 'headphones': {
+          ctx.strokeStyle = col; ctx.lineWidth = 6;
+          ctx.beginPath();
+          ctx.arc(0, -sz * 0.02, sz * 0.42, Math.PI, 0);
+          ctx.stroke();
+          ctx.fillStyle = col;
+          roundRect(ctx, -sz * 0.48, -sz * 0.14, sz * 0.14, sz * 0.3, sz * 0.04);
+          ctx.fill();
+          roundRect(ctx, sz * 0.34, -sz * 0.14, sz * 0.14, sz * 0.3, sz * 0.04);
+          ctx.fill();
+          break;
+        }
+        case 'wizard_hat': {
+          ctx.fillStyle = col;
+          ctx.beginPath();
+          ctx.moveTo(-sz * 0.4, sz * 0.1);
+          ctx.lineTo(sz * 0.4, sz * 0.1);
+          ctx.lineTo(sz * 0.05, -sz * 0.55);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = '#FFD700';
+          for (let i = 0; i < 3; i++) {
+            ctx.beginPath();
+            ctx.arc(-sz * 0.14 + i * sz * 0.14, -sz * 0.4, sz * 0.04, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+        }
+        case 'viking': {
+          ctx.fillStyle = col;
+          roundRect(ctx, -sz * 0.42, -sz * 0.42, sz * 0.84, sz * 0.4, sz * 0.1);
+          ctx.fill();
+          ctx.fillStyle = '#757575';
+          [[-1, -1], [1, -1]].forEach(([sx]) => {
+            ctx.beginPath();
+            ctx.moveTo(sx * sz * 0.3, -sz * 0.42);
+            ctx.lineTo(sx * sz * 0.5, -sz * 0.7);
+            ctx.lineTo(sx * sz * 0.18, -sz * 0.42);
+            ctx.fill();
+          });
+          ctx.fillStyle = '#FF8A65';
+          roundRect(ctx, -sz * 0.08, -sz * 0.32, sz * 0.16, sz * 0.16, sz * 0.03);
+          ctx.fill();
+          break;
+        }
+      }
+      ctx.restore();
     }
   }
 
@@ -592,6 +1600,7 @@
     if (willEat) {
       score++;
       scoreEl.textContent = score;
+      addCoins(COINS_PER_APPLE);
       moveDuration = calcMoveDuration(score);
       sfx.eat();
       vibrate(20);
@@ -971,7 +1980,8 @@
     else if (k === 'ArrowLeft' || k === 'a' || k === 'A' || k === 'ф' || k === 'Ф') setDirection(-1, 0);
     else if (k === 'ArrowRight' || k === 'd' || k === 'D' || k === 'в' || k === 'В') setDirection(1, 0);
     else if (k === 'Escape' || k === 'p' || k === 'P' || k === 'з' || k === 'З') {
-      if (lbModal.classList.contains('active')) lbClose();
+      if (shopModal.classList.contains('active')) shopClose();
+      else if (lbModal.classList.contains('active')) lbClose();
       else setPaused(true);
     }
     else if (k === 'Enter' || k === ' ') {
@@ -1098,6 +2108,20 @@
     });
   });
 
+  // ========== Shop buttons ==========
+  btnShop.addEventListener('click', () => { sfx.ui(); shopOpen(); });
+  btnShopClose.addEventListener('click', () => { sfx.ui(); shopClose(); });
+  shopModalBg.addEventListener('click', shopClose);
+
+  shopTabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      if (!tab.classList.contains('active')) sfx.ui();
+      shopTabs.forEach((t) => t.classList.toggle('active', t === tab));
+      currentShopCategory = tab.dataset.cat;
+      renderShopItems();
+    });
+  });
+
   // ---------- Auto-pause on background ----------
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && running && !gameOver && !paused) {
@@ -1143,5 +2167,6 @@
   pauseOverlay.classList.add('hidden');
   updateSoundIcon();
   updateContinueBtn();
+  updateCoinsUI();
   applyModeUI();
 })();
