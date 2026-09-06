@@ -1,4 +1,4 @@
-﻿(() => {
+(() => {
   'use strict';
 
   // ---------- Safe localStorage (может быть недоступен в приватных webview) ----------
@@ -667,6 +667,12 @@
       screens[key].classList.remove('active');
     }
     screens[name].classList.add('active');
+    if (name === 'game') {
+      requestAnimationFrame(() => {
+        sizeCanvas();
+        setTimeout(sizeCanvas, 50);
+      });
+    }
   }
 
   // ---------- Сохранение партии («Продолжить») ----------
@@ -1102,19 +1108,34 @@
 
   // ---------- Canvas sizing ----------
   function sizeCanvas() {
+    const wrap = canvas.parentElement;
+    const wrapRect = wrap ? wrap.getBoundingClientRect() : null;
     const rect = canvas.getBoundingClientRect();
-    if (rect.width < 1 || rect.height < 1) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(rect.width * dpr);
-    canvas.height = Math.round(rect.height * dpr);
+    const w = wrapRect && wrapRect.width > 1 ? wrapRect.width : rect.width;
+    const h = wrapRect && wrapRect.height > 1 ? wrapRect.height : rect.height;
+    if (w < 1 || h < 1) return;
+    const side = Math.min(w, h);
+    if (side < 1) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.style.width = side + 'px';
+    canvas.style.height = side + 'px';
+    canvas.width = Math.round(side * dpr);
+    canvas.height = Math.round(side * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    boardSize = rect.width;
+    boardSize = side;
     cellSize = boardSize / GRID;
     draw(currentT);
   }
 
   window.addEventListener('resize', sizeCanvas);
+  window.addEventListener('orientationchange', () => setTimeout(sizeCanvas, 150));
   window.addEventListener('load', sizeCanvas);
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => sizeCanvas());
+    const wrap = canvas.parentElement;
+    if (wrap) ro.observe(wrap);
+    ro.observe(document.documentElement);
+  }
 
   // ---------- Init ----------
   timerChipEl.classList.add('hidden');
