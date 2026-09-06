@@ -46,7 +46,6 @@
   const GRID = 15;
   const BASE_SPEED = 140;
   const MIN_SPEED = 70;
-  const SPEED_STEP = 6;
   const MODE_ENDLESS = 'endless';
   const MODE_RACE = 'race';
   const RACE_DURATIONS = [60, 90, 120];
@@ -310,6 +309,14 @@
   }
 
   // ---------- Utility ----------
+  // Скорость движения. В «Бесконечной» — постоянная (режим «на расслабоне»);
+  // в «Гонке» — плавное ускорение: первые яблоки почти не ускоряют, потом нарастает.
+  function calcMoveDuration(score) {
+    if (mode !== MODE_RACE) return BASE_SPEED;
+    const t = Math.min(1, Math.max(0, score / 25));
+    return Math.round(MIN_SPEED + (BASE_SPEED - MIN_SPEED) * Math.sqrt(1 - t * t));
+  }
+
   function spawnFood() {
     const occupied = new Set(snake.map(seg => seg.y * GRID + seg.x));
     const free = [];
@@ -319,7 +326,20 @@
       }
     }
     if (free.length === 0) return false; // snake filled the board -> win
-    food = free[Math.floor(Math.random() * free.length)];
+    // взвешенный выбор: чем дальше от края, тем выше шанс — яблоки чаще в центре
+    const weights = free.map((c) => {
+      const d = Math.min(c.x, c.y, GRID - 1 - c.x, GRID - 1 - c.y) + 1;
+      return d * d;
+    });
+    let total = 0;
+    weights.forEach((w) => { total += w; });
+    let r = Math.random() * total;
+    let idx = 0;
+    for (; idx < free.length; idx++) {
+      r -= weights[idx];
+      if (r <= 0) break;
+    }
+    food = free[idx];
     return true;
   }
 
@@ -489,7 +509,7 @@
     if (willEat) {
       score++;
       scoreEl.textContent = score;
-      moveDuration = Math.max(MIN_SPEED, BASE_SPEED - score * SPEED_STEP);
+      moveDuration = calcMoveDuration(score);
       sfx.eat();
       vibrate(20);
       if (!spawnFood()) {
@@ -578,6 +598,7 @@
     dir = { x: 1, y: 0 };
     nextDir = { x: 1, y: 0 };
     score = 0;
+    moveDuration = calcMoveDuration(0);
     gameOver = false;
     gameWon = false;
     paused = false;
