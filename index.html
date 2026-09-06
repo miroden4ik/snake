@@ -22,6 +22,17 @@
         <span class="logo-text">Snake</span>
       </div>
       <div class="hud-group">
+        <button id="btn-sound" class="sound-btn" aria-label="Звук" title="Вкл/выкл звук">
+          <svg id="sound-on-ic" viewBox="0 0 24 24" width="20" height="20">
+            <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/>
+            <path d="M16.5 8.5a4 4 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <svg id="sound-off-ic" class="hidden" viewBox="0 0 24 24" width="20" height="20">
+            <path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/>
+            <line x1="16" y1="9" x2="22" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <line x1="22" y1="9" x2="16" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </button>
         <div id="user-chip" class="user-chip hidden">
           <img id="user-avatar" class="user-avatar" alt="">
           <span id="user-name" class="user-name">Игрок</span>
@@ -93,7 +104,24 @@
     <div id="screen-game" class="screen">
       <div class="game-wrapper">
         <div class="canvas-wrap">
+          <button id="btn-pause" class="pause-btn" aria-label="Пауза" title="Пауза">
+            <svg viewBox="0 0 24 24" width="20" height="20">
+              <rect x="6" y="5" width="4" height="14" rx="1.5" fill="currentColor"/>
+              <rect x="14" y="5" width="4" height="14" rx="1.5" fill="currentColor"/>
+            </svg>
+          </button>
           <canvas id="game-canvas"></canvas>
+          <div id="pause-overlay" class="pause-overlay hidden">
+            <div class="pause-card">
+              <svg viewBox="0 0 24 24" width="48" height="48">
+                <rect x="6" y="5" width="4" height="14" rx="1.5" fill="currentColor"/>
+                <rect x="14" y="5" width="4" height="14" rx="1.5" fill="currentColor"/>
+              </svg>
+              <span class="pause-title">Пауза</span>
+              <button id="btn-resume" class="btn btn-primary">Продолжить</button>
+              <button id="btn-pause-home" class="btn btn-secondary">В меню</button>
+            </div>
+          </div>
         </div>
     </div>
     </div>

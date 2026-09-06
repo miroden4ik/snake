@@ -16,6 +16,9 @@ export default {
       if (path === '/leaderboard' && method === 'GET') {
         return handleCors(await getLeaderboard(env, url));
       }
+      if (path === '/rank' && method === 'GET') {
+        return handleCors(await getRank(env, url));
+      }
       if (path === '/submit' && method === 'POST') {
         return handleCors(await submitScore(request, env));
       }
@@ -44,11 +47,11 @@ function handleCors(response) {
   return response;
 }
 
-const CLIENT_SECRET = ''; // TODO: Вставьте Client Secret из настроек VK Mini App
+const CLIENT_SECRET = ''; // Legacy: вставьте Client Secret сюда ИЛИ (лучше) задайте env-секрет VK_CLIENT_SECRET через `wrangler secret put VK_CLIENT_SECRET`
 
-async function verifyVKSignature(paramsStr) {
-  if (!CLIENT_SECRET) {
-    console.warn('[WARNING] CLIENT_SECRET не установлен. Подпись НЕ проверяется, принимаются все запросы!');
+async function verifyVKSignature(paramsStr, secret) {
+  if (!secret) {
+    console.warn('[WARNING] Секрет VK не установлен (VK_CLIENT_SECRET пуст). Подпись НЕ проверяется, принимаются все запросы!');
     return true;
   }
 
@@ -115,6 +118,48 @@ async function getLeaderboard(env, url) {
   });
 }
 
+async function getRank(env, url) {
+  const kv = env.SNAKE_LB;
+  const category = categoryFromName(url.searchParams.get('category'));
+  const uid = url.searchParams.get('vk_user_id');
+  if (!uid) {
+    return new Response(JSON.stringify({ success: false, error: 'Missing vk_user_id' }), {
+      status: 400,
+      headers: JSON_HEADERS,
+    });
+  }
+
+  // кэш на 60 сек, чтобы не сканировать KV на каждый запрос ранга
+  const cacheKey = '_rank:' + category;
+  let cached = await kv.get(cacheKey, { type: 'json' });
+  if (!cached || !Array.isArray(cached.scores) || Math.floor(Date.now() / 1000) - cached.ts > 60) {
+    const allUsers = await scanAllUsers(kv, category);
+    allUsers.sort((a, b) => b.score - a.score);
+    const scores = allUsers.map((u) => u.score);
+    const ts = Math.floor(Date.now() / 1000);
+    await kv.put(cacheKey, JSON.stringify({ ts, scores }), { expirationTtl: 120 });
+    cached = { ts, scores };
+  }
+
+  const userKey = `user:${category}:${uid}`;
+  const me = await kv.get(userKey, { type: 'json' });
+  if (!me) {
+    return new Response(JSON.stringify({ success: true, rank: null, total: cached.scores.length, score: null }), {
+      status: 200,
+      headers: JSON_HEADERS,
+    });
+  }
+
+  // ранг = сколько пользователей со строго большим счётом + 1
+  const above = cached.scores.filter((s) => s > me.score).length;
+  const rank = above + 1;
+
+  return new Response(JSON.stringify({ success: true, rank, total: cached.scores.length, score: me.score }), {
+    status: 200,
+    headers: JSON_HEADERS,
+  });
+}
+
 async function scanAllUsers(kv, category) {
   const results = [];
   let cursor = null;
@@ -156,15 +201,17 @@ async function submitScore(request, env) {
     });
   }
 
+  const secret = (env && env.VK_CLIENT_SECRET) || CLIENT_SECRET;
+
   if (vk_sign_params) {
-    const valid = await verifyVKSignature(vk_sign_params);
+    const valid = await verifyVKSignature(vk_sign_params, secret);
     if (!valid) {
       return new Response(JSON.stringify({ success: false, error: 'Invalid VK signature' }), {
         status: 403,
         headers: JSON_HEADERS,
       });
     }
-  } else if (CLIENT_SECRET) {
+  } else if (secret) {
     return new Response(JSON.stringify({ success: false, error: 'vk_sign_params required' }), {
       status: 400,
       headers: JSON_HEADERS,

@@ -34,6 +34,13 @@
   const btnPlay = document.getElementById('btn-play');
   const btnRetry = document.getElementById('btn-retry');
   const btnHome = document.getElementById('btn-home');
+  const btnPause = document.getElementById('btn-pause');
+  const btnResume = document.getElementById('btn-resume');
+  const btnPauseHome = document.getElementById('btn-pause-home');
+  const pauseOverlay = document.getElementById('pause-overlay');
+  const btnSound = document.getElementById('btn-sound');
+  const soundOnIc = document.getElementById('sound-on-ic');
+  const soundOffIc = document.getElementById('sound-off-ic');
 
   // ---------- Constants ----------
   const GRID = 15;
@@ -74,6 +81,8 @@
   let running = false;
   let gameOver = false;
   let gameWon = false;
+  let paused = false;
+  let pauseStart = 0;
   let rafId = null;
   let moveDuration = BASE_SPEED;
   let moveStart = 0;
@@ -239,6 +248,65 @@
   function fmtDur(sec) {
     const s = Math.max(0, Math.floor(sec));
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  // ---------- Звук и вибрация (Web Audio, без файлов) ----------
+  let audioCtx = null;
+  let sfxMuted = localStorage.getItem('snake_sfx_muted') === '1';
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { audioCtx = null; }
+    }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    return audioCtx;
+  }
+
+  function playTone(freq, startOffset, dur, type = 'sine', gainVal = 0.2) {
+    if (!audioCtx || sfxMuted) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const t = audioCtx.currentTime + startOffset;
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(gainVal, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.02);
+  }
+
+  const sfx = {
+    eat() {
+      if (!ensureAudio()) return;
+      playTone(660, 0, 0.09, 'square', 0.18);
+      playTone(880, 0.08, 0.12, 'square', 0.16);
+    },
+    die() {
+      if (!ensureAudio()) return;
+      playTone(300, 0, 0.18, 'sawtooth', 0.18);
+      playTone(200, 0.14, 0.25, 'sawtooth', 0.16);
+    },
+    win() {
+      if (!ensureAudio()) return;
+      [523, 659, 784, 1047].forEach((f, i) => playTone(f, i * 0.12, 0.16, 'triangle', 0.18));
+    },
+    toggleMute() {
+      sfxMuted = !sfxMuted;
+      localStorage.setItem('snake_sfx_muted', sfxMuted ? '1' : '0');
+      return sfxMuted;
+    },
+  };
+
+  function vibrate(pattern) {
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (_) { /* нет поддержки */ }
+  }
+
+  function updateSoundIcon() {
+    soundOnIc.classList.toggle('hidden', sfxMuted);
+    soundOffIc.classList.toggle('hidden', !sfxMuted);
+    btnSound.classList.toggle('muted', sfxMuted);
   }
 
   // ---------- Utility ----------
@@ -422,6 +490,8 @@
       score++;
       scoreEl.textContent = score;
       moveDuration = Math.max(MIN_SPEED, BASE_SPEED - score * SPEED_STEP);
+      sfx.eat();
+      vibrate(20);
       if (!spawnFood()) {
         endGame(true); // board is full -> victory
         return;
@@ -432,7 +502,7 @@
   }
 
   function frame(now) {
-    if (!running || gameOver) return;
+    if (!running || gameOver || paused) return;
     rafId = requestAnimationFrame(frame);
 
     animTime = now;
@@ -472,6 +542,22 @@
     rafId = null;
   }
 
+  function setPaused(p) {
+    if (!running || gameOver || paused === p) return;
+    paused = p;
+    pauseOverlay.classList.toggle('hidden', !p);
+    if (p) {
+      stopLoop();
+      pauseStart = performance.now();
+    } else {
+      // сдвигаем таймер Гонки на время паузы, чтобы не жульничать
+      const pauseDur = performance.now() - pauseStart;
+      if (mode === MODE_RACE) raceEndAt += pauseDur;
+      moveStart = performance.now();
+      startLoop();
+    }
+  }
+
   // ---------- Screen switching ----------
   function showScreen(name) {
     for (const key of Object.keys(screens)) {
@@ -494,6 +580,8 @@
     score = 0;
     gameOver = false;
     gameWon = false;
+    paused = false;
+    pauseOverlay.classList.add('hidden');
     running = true;
 
     scoreEl.textContent = 0;
@@ -514,6 +602,8 @@
     running = false;
     gameOver = true;
     gameWon = won;
+    paused = false;
+    pauseOverlay.classList.add('hidden');
     stopLoop();
 
     if (score > getBest()) {
@@ -523,6 +613,8 @@
     const isRace = mode === MODE_RACE;
     overTitleEl.textContent = won ? 'Победа!' : (isRace ? 'Время вышло!' : 'Игра окончена');
     overTitleEl.classList.toggle('race-timeout', isRace && !won);
+    if (won) { sfx.win(); vibrate([40, 60, 40]); }
+    else { sfx.die(); vibrate(120); }
     finalScoreEl.textContent = score;
     bestScoreEl.textContent = getBest();
     lbStatusEl.textContent = '';
@@ -537,6 +629,20 @@
   }
 
   // ---------- Leaderboard (только «Гонка») ----------
+  async function lbSubmitRank() {
+    if (!LB_ENABLED || !currentUser.vk_user_id) return null;
+    try {
+      const res = await fetch(CONFIG_URL + '/rank?category=' + encodeURIComponent(lbCategory()) + '&vk_user_id=' + encodeURIComponent(currentUser.vk_user_id), {
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      return (data && data.success && data.rank != null) ? data : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   async function lbSubmit(score) {
     if (!LB_ENABLED || !currentUser.vk_user_id || score <= 0) {
       lbStatusEl.textContent = '';
@@ -559,7 +665,21 @@
         body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => ({}));
-      if (data && data.updated) {
+      // показываем место игрока в категории
+      const rankData = await lbSubmitRank();
+      if (rankData) {
+        const place = rankData.rank;
+        const total = rankData.total || 0;
+        if (data && data.updated) {
+          lbStatusEl.textContent = 'Новый рекорд! Ты на ' + place + '-м месте' + (total ? ' из ' + total : '') + '.';
+        } else if (place <= 10) {
+          lbStatusEl.textContent = 'Ты на ' + place + '-м месте в топе!';
+        } else if (total) {
+          lbStatusEl.textContent = 'Ты на ' + place + '-м месте из ' + total + '.';
+        } else {
+          lbStatusEl.textContent = 'Попробуй побить свой рекорд!';
+        }
+      } else if (data && data.updated) {
         lbStatusEl.textContent = 'Новый рекорд — в топе!';
       } else {
         lbStatusEl.textContent = 'В топе ещё выше — попробуй побить!';
@@ -665,9 +785,13 @@
     else if (k === 'ArrowDown' || k === 's' || k === 'S' || k === 'ы' || k === 'Ы') setDirection(0, 1);
     else if (k === 'ArrowLeft' || k === 'a' || k === 'A' || k === 'ф' || k === 'Ф') setDirection(-1, 0);
     else if (k === 'ArrowRight' || k === 'd' || k === 'D' || k === 'в' || k === 'В') setDirection(1, 0);
-    else if (k === 'Escape') lbClose();
+    else if (k === 'Escape' || k === 'p' || k === 'P' || k === 'з' || k === 'З') {
+      if (lbModal.classList.contains('active')) lbClose();
+      else setPaused(true);
+    }
     else if (k === 'Enter' || k === ' ') {
-      if (!running && !gameOver) startGame();
+      if (paused) setPaused(false);
+      else if (!running && !gameOver) startGame();
       else if (gameOver) startGame();
     }
   });
@@ -719,6 +843,17 @@
   // ---------- Buttons ----------
   btnPlay.addEventListener('click', startGame);
   btnRetry.addEventListener('click', startGame);
+  btnPause.addEventListener('click', () => setPaused(true));
+  btnResume.addEventListener('click', () => setPaused(false));
+  btnPauseHome.addEventListener('click', () => {
+    paused = false;
+    pauseOverlay.classList.add('hidden');
+    running = false;
+    gameOver = false;
+    stopLoop();
+    applyModeUI();
+    showScreen('start');
+  });
   btnHome.addEventListener('click', () => {
     running = false;
     gameOver = false;
@@ -743,6 +878,7 @@
     });
   });
 
+  btnSound.addEventListener('click', () => { sfx.toggleMute(); updateSoundIcon(); });
   btnLeaders.addEventListener('click', () => lbOpen(lbCategory()));
   btnLeadersOver.addEventListener('click', () => lbOpen(lbCategory()));
   btnLbClose.addEventListener('click', lbClose);
@@ -774,5 +910,7 @@
   // ---------- Init ----------
   timerChipEl.classList.add('hidden');
   btnLeadersOver.classList.add('hidden');
+  pauseOverlay.classList.add('hidden');
+  updateSoundIcon();
   applyModeUI();
 })();

@@ -5,6 +5,7 @@
 
 ## Роуты
 - `GET  /leaderboard?category=race60&limit=10` — топ игроков категории (кэш 5 мин).
+- `GET  /rank?category=race60&vk_user_id=123` — место игрока в категории (кэш ~60 сек). Ответ: `{ success, rank, total, score }`.
 - `POST /submit` — отправить рекорд. JSON: `{ vk_user_id, first_name, last_name, photo_100, score, category, vk_sign_params }`.
   Сервер сохраняет рекорд только если `score` выше прежнего для этого пользователя и категории.
 - `POST /delete` — удалить пользователя категории. JSON: `{ vk_user_id, category }` (для отладки).
@@ -22,5 +23,11 @@ curl "https://<url>.workers.dev/leaderboard?category=race60"
 ```
 
 ## Валидация подписи VK
-В `worker.js`, константа `CLIENT_SECRET` — Client Secret из настроек VK Mini App
-(Настройки → Кнопки и ссылки / Open API). Пока пусто — подпись не проверяется (режим разработки).
+**Рекомендуется** задать Client Secret как env-секрет воркера (не хранить в коде):
+```powershell
+wrangler secret put VK_CLIENT_SECRET
+```
+В ответ на запрос вставьте Client Secret из настроек VK Mini App
+(Настройки → Кнопки и ссылки / Open API).
+
+Пока секрет не задан — подпись не проверяется (режим разработки, воркер открыт для накрутки).
