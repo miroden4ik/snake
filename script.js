@@ -1,6 +1,29 @@
 ﻿(() => {
   'use strict';
 
+  // ---------- Safe localStorage (может быть недоступен в приватных webview) ----------
+  const store = (() => {
+    const denied = (() => { try { const k = '__t__'; window.localStorage.setItem(k, '1'); window.localStorage.removeItem(k); return false; } catch (_) { return true; } })();
+    const safeGet = (key) => { try { return window.localStorage.getItem(key); } catch (_) { return null; } };
+    const safeSet = (key, val) => { try { window.localStorage.setItem(key, String(val)); } catch (_) { /* нет доступа */ } };
+    const safeRemove = (key) => { try { window.localStorage.removeItem(key); } catch (_) { /* нет доступа */ } };
+    const mem = {};
+    return {
+      get(key) {
+        if (!denied) return safeGet(key);
+        return key in mem ? mem[key] : null;
+      },
+      set(key, val) {
+        mem[key] = String(val);
+        safeSet(key, val);
+      },
+      remove(key) {
+        delete mem[key];
+        safeRemove(key);
+      },
+    };
+  })();
+
   // ---------- DOM refs ----------
   const canvas = document.getElementById('game-canvas');
   const ctx = canvas.getContext('2d');
@@ -14,6 +37,7 @@
   const subtitleEl = document.getElementById('subtitle');
   const modeBestEl = document.getElementById('mode-best');
   const durRow = document.getElementById('dur-row');
+  const speedRow = document.getElementById('speed-row');
   const btnLeaders = document.getElementById('btn-leaders');
   const btnLeadersOver = document.getElementById('btn-leaders-over');
   const btnLbClose = document.getElementById('btn-lb-close');
@@ -32,6 +56,8 @@
     over: document.getElementById('screen-over'),
   };
   const btnPlay = document.getElementById('btn-play');
+  const btnContinue = document.getElementById('btn-continue');
+  const speedChips = document.querySelectorAll('.speed-chip');
   const btnRetry = document.getElementById('btn-retry');
   const btnHome = document.getElementById('btn-home');
   const btnPause = document.getElementById('btn-pause');
@@ -50,10 +76,19 @@
   const MODE_RACE = 'race';
   const RACE_DURATIONS = [60, 90, 120];
   const DEFAULT_RACE_DURATION = 60;
+  // скорости «Бесконечной» (мс на шаг): медленная / средняя / высокая
+  const ENDLESS_SPEEDS = {
+    slow: 260,
+    normal: 140,
+    fast: 80,
+  };
+  const ENDLESS_SPEED_KEY = 'snake_endless_speed';
   const BEST_ENDLESS_KEY = 'snake_best_score';
   const BEST_RACE_KEY = (d) => 'snake_best_race' + d;
   const MODE_KEY = 'snake_mode';
   const DUR_KEY = 'snake_duration';
+  // ключи сохранённой партии
+  const SAVE_KEY = 'snake_saved_game';
   const COLORS = {
     board: '#243B58',
     food: '#E84545',
@@ -72,14 +107,13 @@
   let nextDir = { x: 1, y: 0 };
   let food = null;
   let score = 0;
-  let bestEndless = Number(localStorage.getItem(BEST_ENDLESS_KEY) || 0);
+  let bestEndless = Number(store.get(BEST_ENDLESS_KEY) || 0);
   const bestRace = {};
   RACE_DURATIONS.forEach((d) => {
-    bestRace[d] = Number(localStorage.getItem(BEST_RACE_KEY(d)) || 0);
+    bestRace[d] = Number(store.get(BEST_RACE_KEY(d)) || 0);
   });
   let running = false;
   let gameOver = false;
-  let gameWon = false;
   let paused = false;
   let pauseStart = 0;
   let rafId = null;
@@ -89,9 +123,16 @@
   let currentT = 0;
   let cellSize = 0;
   let boardSize = 0;
-  let mode = localStorage.getItem(MODE_KEY) === MODE_RACE ? MODE_RACE : MODE_ENDLESS;
-  let raceDuration = Number(localStorage.getItem(DUR_KEY) || DEFAULT_RACE_DURATION);
+  let mode = store.get(MODE_KEY) === MODE_RACE ? MODE_RACE : MODE_ENDLESS;
+  let raceDuration = Number(store.get(DUR_KEY) || DEFAULT_RACE_DURATION);
   let raceEndAt = 0;
+  const endlessSpeedDefault = Object.keys(ENDLESS_SPEEDS)[0];
+  let endlessSpeed = Object.prototype.hasOwnProperty.call(ENDLESS_SPEEDS, store.get(ENDLESS_SPEED_KEY))
+    ? store.get(ENDLESS_SPEED_KEY)
+    : endlessSpeedDefault;
+  // сохранённая партия: {saved: bool, mode, score, snake, dir, nextDir, food, raceLeftMs, raceEndAt}
+  let savedGame = null;
+  try { const raw = store.get(SAVE_KEY); if (raw) savedGame = JSON.parse(raw) || null; } catch (_) { savedGame = null; }
 
   // dev/test helper: ?race=5 запускает Гонку на 5 секунд (дробные тоже можно)
   let urlRaceOverride = 0;
@@ -99,7 +140,7 @@
     urlRaceOverride = Number(new URLSearchParams(window.location.search).get('race'));
   } catch (_) { /* игнор */ }
   if (urlRaceOverride > 0) {
-    raceDuration = urlRaceOverride;
+    raceDuration = Math.max(1, urlRaceOverride);
   } else if (!RACE_DURATIONS.includes(raceDuration)) {
     raceDuration = DEFAULT_RACE_DURATION;
   }
@@ -166,10 +207,10 @@
       const merge = (key, val) => {
         const prev = Number(val) || 0;
         if (key === 'endless') {
-          if (prev > bestEndless) { bestEndless = prev; localStorage.setItem(BEST_ENDLESS_KEY, String(bestEndless)); changed = true; }
+          if (prev > bestEndless) { bestEndless = prev; store.set(BEST_ENDLESS_KEY, String(bestEndless)); changed = true; }
         } else {
           const d = Number(key.replace('race', ''));
-          if (prev > (bestRace[d] || 0)) { bestRace[d] = prev; localStorage.setItem(BEST_RACE_KEY(d), String(prev)); changed = true; }
+          if (prev > (bestRace[d] || 0)) { bestRace[d] = prev; store.set(BEST_RACE_KEY(d), String(prev)); changed = true; }
         }
       };
       Object.keys(keys).forEach((k) => {
@@ -219,7 +260,14 @@
           applyUserChip();
           syncBestScoresFromVk();
         }
-      }).catch(() => {})
+      }).catch(() => {
+        // профиль не получен (нет авторизации/ошибка): если знаем vk_user_id
+        // из launch-параметров — показываем нейтральный чип без аватарки
+        if (currentUser.vk_user_id != null) {
+          userName.textContent = currentUser.first_name || 'Игрок';
+          userChip.classList.remove('hidden');
+        }
+      })
     ).catch(() => {});
   }
   initVk();
@@ -235,11 +283,11 @@
   function setBest(n) {
     if (mode === MODE_RACE) {
       bestRace[raceDuration] = n;
-      localStorage.setItem(BEST_RACE_KEY(raceDuration), String(n));
+      store.set(BEST_RACE_KEY(raceDuration), String(n));
       vkStorageSet(VK_STORAGE.bestRace(raceDuration), n);
     } else {
       bestEndless = n;
-      localStorage.setItem(BEST_ENDLESS_KEY, String(n));
+      store.set(BEST_ENDLESS_KEY, String(n));
       vkStorageSet(VK_STORAGE.bestEndless, n);
     }
   }
@@ -251,7 +299,7 @@
 
   // ---------- Звук и вибрация (Web Audio, без файлов) ----------
   let audioCtx = null;
-  let sfxMuted = localStorage.getItem('snake_sfx_muted') === '1';
+  let sfxMuted = store.get('snake_sfx_muted') === '1';
 
   function ensureAudio() {
     if (!audioCtx) {
@@ -291,9 +339,13 @@
       if (!ensureAudio()) return;
       [523, 659, 784, 1047].forEach((f, i) => playTone(f, i * 0.12, 0.16, 'triangle', 0.18));
     },
+    ui() {
+      if (!ensureAudio()) return;
+      playTone(500, 0, 0.06, 'sine', 0.12);
+    },
     toggleMute() {
       sfxMuted = !sfxMuted;
-      localStorage.setItem('snake_sfx_muted', sfxMuted ? '1' : '0');
+      store.set('snake_sfx_muted', sfxMuted ? '1' : '0');
       return sfxMuted;
     },
   };
@@ -309,10 +361,10 @@
   }
 
   // ---------- Utility ----------
-  // Скорость движения. В «Бесконечной» — постоянная (режим «на расслабоне»);
+  // Скорость движения. В «Бесконечной» — постоянная, задаётся чипом скорости;
   // в «Гонке» — плавное ускорение: первые яблоки почти не ускоряют, потом нарастает.
   function calcMoveDuration(score) {
-    if (mode !== MODE_RACE) return BASE_SPEED;
+    if (mode !== MODE_RACE) return ENDLESS_SPEEDS[endlessSpeed];
     const t = Math.min(1, Math.max(0, score / 25));
     return Math.round(MIN_SPEED + (BASE_SPEED - MIN_SPEED) * Math.sqrt(1 - t * t));
   }
@@ -586,8 +638,82 @@
     screens[name].classList.add('active');
   }
 
+  // ---------- Сохранение партии («Продолжить») ----------
+  function clearSave() {
+    savedGame = null;
+    store.remove(SAVE_KEY);
+  }
+
+  function saveGame() {
+    if (!running) return;
+    const st = {
+      saved: true,
+      mode,
+      score,
+      snake: snake.map(seg => ({ x: seg.x, y: seg.y })),
+      dir: { ...dir },
+      nextDir: { ...nextDir },
+      food: food ? { ...food } : null,
+      raceLeftMs: mode === MODE_RACE ? Math.max(0, raceEndAt - performance.now()) : 0,
+      raceDuration,
+      endlessSpeed,
+    };
+    try {
+      store.set(SAVE_KEY, JSON.stringify(st));
+      savedGame = st;
+    } catch (_) { /* не сохраняется */ }
+  }
+
+  function updateContinueBtn() {
+    btnContinue.classList.toggle('hidden', !(savedGame && savedGame.saved));
+  }
+
+  function resumeGame() {
+    if (!savedGame || !savedGame.saved || !Array.isArray(savedGame.snake) || savedGame.snake.length === 0) {
+      startGame();
+      return;
+    }
+    if (savedGame.mode === MODE_RACE) raceDuration = savedGame.raceDuration || DEFAULT_RACE_DURATION;
+    mode = savedGame.mode;
+    store.set(MODE_KEY, mode);
+    if (mode === MODE_ENDLESS) {
+      endlessSpeed = savedGame.endlessSpeed || endlessSpeedDefault;
+      store.set(ENDLESS_SPEED_KEY, endlessSpeed);
+    }
+    snake = savedGame.snake.map(seg => ({ x: seg.x, y: seg.y }));
+    prevSnake = snake.map(seg => ({ x: seg.x, y: seg.y }));
+    dir = { ...savedGame.dir };
+    nextDir = { ...savedGame.nextDir };
+    food = savedGame.food ? { ...savedGame.food } : null;
+    score = savedGame.score || 0;
+    moveDuration = calcMoveDuration(score);
+    gameOver = false;
+    paused = false;
+    pauseOverlay.classList.add('hidden');
+    running = true;
+
+    scoreEl.textContent = score;
+    timerChipEl.classList.toggle('hidden', mode !== MODE_RACE);
+    if (mode === MODE_RACE) {
+      raceEndAt = performance.now() + (savedGame.raceLeftMs != null ? savedGame.raceLeftMs : raceDuration * 1000);
+      timerEl.textContent = fmtDur(Math.ceil((raceEndAt - performance.now()) / 1000));
+      timerEl.classList.remove('low');
+    } else {
+      raceEndAt = 0;
+    }
+    if (!food) spawnFood();
+    clearSave();
+    showScreen('game');
+    requestAnimationFrame(() => {
+      sizeCanvas();
+      startLoop();
+    });
+  }
+
   // ---------- Start / end ----------
   function startGame() {
+    clearSave();
+    updateContinueBtn();
     const startX = Math.floor(GRID / 2);
     const startY = Math.floor(GRID / 2);
     snake = [
@@ -600,7 +726,6 @@
     score = 0;
     moveDuration = calcMoveDuration(0);
     gameOver = false;
-    gameWon = false;
     paused = false;
     pauseOverlay.classList.add('hidden');
     running = true;
@@ -622,10 +747,10 @@
   function endGame(won = false, timedOut = false) {
     running = false;
     gameOver = true;
-    gameWon = won;
     paused = false;
     pauseOverlay.classList.add('hidden');
     stopLoop();
+    clearSave();
 
     if (score > getBest()) {
       setBest(score);
@@ -782,9 +907,11 @@
     modeBtns.forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
     const isRace = mode === MODE_RACE;
     durRow.classList.toggle('hidden', !isRace);
+    speedRow.classList.toggle('hidden', isRace);
     timerChipEl.classList.toggle('hidden', !isRace);
     if (isRace) timerEl.textContent = fmtDur(raceDuration);
     durChips.forEach((c) => c.classList.toggle('active', Number(c.dataset.sec) === raceDuration));
+    speedChips.forEach((c) => c.classList.toggle('active', c.dataset.speed === endlessSpeed));
     subtitleEl.textContent = isRace
       ? 'Съешь как можно больше яблок за ' + raceDuration + ' секунд!'
       : 'Собирай яблоки и расти!';
@@ -862,16 +989,19 @@
   window.addEventListener('touchcancel', swipeEndFn, { passive: true });
 
   // ---------- Buttons ----------
-  btnPlay.addEventListener('click', startGame);
-  btnRetry.addEventListener('click', startGame);
+  btnPlay.addEventListener('click', () => { sfx.ui(); startGame(); });
+  btnContinue.addEventListener('click', () => { sfx.ui(); resumeGame(); });
+  btnRetry.addEventListener('click', () => { sfx.ui(); startGame(); });
   btnPause.addEventListener('click', () => setPaused(true));
-  btnResume.addEventListener('click', () => setPaused(false));
+  btnResume.addEventListener('click', () => { sfx.ui(); setPaused(false); });
   btnPauseHome.addEventListener('click', () => {
+    saveGame();
     paused = false;
     pauseOverlay.classList.add('hidden');
     running = false;
     gameOver = false;
     stopLoop();
+    updateContinueBtn();
     applyModeUI();
     showScreen('start');
   });
@@ -879,37 +1009,64 @@
     running = false;
     gameOver = false;
     stopLoop();
+    updateContinueBtn();
     applyModeUI();
     showScreen('start');
   });
 
   modeBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
+      if (!btn.classList.contains('active')) sfx.ui();
       mode = btn.dataset.mode;
-      localStorage.setItem(MODE_KEY, mode);
+      store.set(MODE_KEY, mode);
+      clearSave();
+      updateContinueBtn();
       applyModeUI();
     });
   });
 
   durChips.forEach((chip) => {
     chip.addEventListener('click', () => {
+      if (!chip.classList.contains('active')) sfx.ui();
       raceDuration = Number(chip.dataset.sec);
-      localStorage.setItem(DUR_KEY, String(raceDuration));
+      store.set(DUR_KEY, String(raceDuration));
+      clearSave();
+      updateContinueBtn();
       applyModeUI();
     });
   });
 
-  btnSound.addEventListener('click', () => { sfx.toggleMute(); updateSoundIcon(); });
-  btnLeaders.addEventListener('click', () => lbOpen(lbCategory()));
-  btnLeadersOver.addEventListener('click', () => lbOpen(lbCategory()));
-  btnLbClose.addEventListener('click', lbClose);
+  speedChips.forEach((chip) => {
+    chip.addEventListener('click', () => {
+      if (!chip.classList.contains('active')) sfx.ui();
+      endlessSpeed = chip.dataset.speed;
+      store.set(ENDLESS_SPEED_KEY, endlessSpeed);
+      clearSave();
+      updateContinueBtn();
+      applyModeUI();
+    });
+  });
+
+  btnSound.addEventListener('click', () => { sfx.ui(); sfx.toggleMute(); updateSoundIcon(); });
+  btnLeaders.addEventListener('click', () => { sfx.ui(); lbOpen(lbCategory()); });
+  btnLeadersOver.addEventListener('click', () => { sfx.ui(); lbOpen(lbCategory()); });
+  btnLbClose.addEventListener('click', () => { sfx.ui(); lbClose(); });
   lbModalBg.addEventListener('click', lbClose);
 
   lbTabs.forEach((tab) => {
     tab.addEventListener('click', () => {
+      if (!tab.classList.contains('active')) sfx.ui();
       lbTabs.forEach((t) => t.classList.toggle('active', t === tab));
       lbOpen(tab.dataset.cat);
     });
+  });
+
+  // ---------- Auto-pause on background ----------
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && running && !gameOver && !paused) {
+      saveGame();
+      setPaused(true);
+    }
   });
 
   // ---------- Canvas sizing ----------
@@ -933,5 +1090,6 @@
   btnLeadersOver.classList.add('hidden');
   pauseOverlay.classList.add('hidden');
   updateSoundIcon();
+  updateContinueBtn();
   applyModeUI();
 })();

@@ -89,7 +89,18 @@
           <button class="dur-chip" data-sec="90">90 с</button>
           <button class="dur-chip" data-sec="120">120 с</button>
         </div>
+        <div id="speed-row" class="speed-row">
+          <button class="speed-chip" data-speed="slow">Медленная</button>
+          <button class="speed-chip active" data-speed="normal">Средняя</button>
+          <button class="speed-chip" data-speed="fast">Высокая</button>
+        </div>
         <p id="mode-best" class="mode-best">Рекорд: 0</p>
+        <button id="btn-continue" class="btn btn-secondary hidden">
+          <svg viewBox="0 0 24 24" width="20" height="20" style="margin-right:8px">
+            <path d="M6 4l12 8-12 8V4z" fill="currentColor"/>
+          </svg>
+          Продолжить
+        </button>
         <button id="btn-play" class="btn btn-primary">
           <svg viewBox="0 0 24 24" width="20" height="20" style="margin-right:8px">
             <polygon points="6,4 20,12 6,20" fill="#fff"/>
