@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Snake</title>
   <link rel="stylesheet" href="style.css">
   <script src="https://unpkg.com/@vkontakte/vk-bridge/dist/browser.min.js"></script>
@@ -93,6 +93,7 @@
         </svg>
         <h1 class="title">Snake</h1>
         <p id="subtitle" class="subtitle">Собирай яблоки и расти!</p>
+        <p id="controls-hint" class="controls-hint">Свайп по полю · стрелки · WASD</p>
         <div class="mode-toggle" role="tablist">
           <button class="mode-btn active" data-mode="endless">Бесконечная</button>
           <button class="mode-btn" data-mode="race">Гонка</button>
@@ -162,6 +163,9 @@
               <button id="btn-pause-home" class="btn btn-secondary">В меню</button>
             </div>
           </div>
+          <div id="countdown-overlay" class="countdown-overlay hidden" aria-live="polite">
+            <span id="countdown-text" class="countdown-text">3</span>
+          </div>
         </div>
       </div>
     </div>
@@ -177,11 +181,18 @@
           <line x1="30" y1="36" x2="50" y2="44" stroke="#E84545" stroke-width="3" stroke-linecap="round"/>
           <line x1="90" y1="36" x2="70" y2="44" stroke="#E84545" stroke-width="3" stroke-linecap="round"/>
         </svg>
-        <h2 class="over-title" id="over-title">Игра окончена</h2>
+        <div class="over-head">
+          <h2 class="over-title" id="over-title">Игра окончена</h2>
+          <div id="record-badge" class="record-badge hidden">Новый рекорд!</div>
+        </div>
         <div class="over-stats">
           <div class="stat">
             <span class="stat-value" id="final-score">0</span>
             <span class="stat-label">Очки</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" id="earned-coins">0</span>
+            <span class="stat-label">Монеты</span>
           </div>
           <div class="stat">
             <span class="stat-value" id="best-score">0</span>
@@ -259,7 +270,7 @@
           </button>
         </div>
         <div id="shop-items" class="shop-items"></div>
-        <p class="shop-hint">Кушай яблоки и получай монеты! 1 яблоко = 1 монета.</p>
+        <p id="shop-hint" class="shop-hint">Кушай яблоки и получай монеты! 1 яблоко = 1 монета.</p>
       </div>
     </div>
 
@@ -268,7 +279,7 @@
       <div id="lb-modal-bg" class="lb-modal-bg"></div>
       <div class="lb-panel">
         <div class="lb-head">
-          <h3>Лидеры · Гонка</h3>
+          <h3 id="lb-title">Лидеры · Гонка</h3>
           <button id="btn-lb-close" class="lb-close" aria-label="Закрыть">
             <svg viewBox="0 0 24 24" width="22" height="22">
               <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
@@ -276,12 +287,15 @@
           </button>
         </div>
         <div class="lb-tabs">
-          <button class="lb-tab" data-cat="race60">60 с</button>
-          <button class="lb-tab" data-cat="race90">90 с</button>
-          <button class="lb-tab" data-cat="race120">120 с</button>
+          <button class="lb-tab" data-cat="endless_slow" data-mode="endless">Медленная</button>
+          <button class="lb-tab" data-cat="endless_normal" data-mode="endless">Средняя</button>
+          <button class="lb-tab" data-cat="endless_fast" data-mode="endless">Высокая</button>
+          <button class="lb-tab" data-cat="race60" data-mode="race">60 с</button>
+          <button class="lb-tab" data-cat="race90" data-mode="race">90 с</button>
+          <button class="lb-tab" data-cat="race120" data-mode="race">120 с</button>
         </div>
         <div id="lb-list" class="lb-list"></div>
-        <p class="lb-hint">Яблок за отведённое время. Топ-10 по каждой длительности.</p>
+        <p id="lb-hint" class="lb-hint">Яблок за отведённое время. Топ-10 по каждой длительности.</p>
       </div>
     </div>
 

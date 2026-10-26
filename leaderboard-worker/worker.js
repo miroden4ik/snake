@@ -1,9 +1,30 @@
 // ===== Лидерборд для змейки (Cloudflare Worker) =====
 // Отдельный воркер от Fruit Blast: данные изолированы (своё KV).
-// Категории: race60, race90, race120 — «Гонка». Лидерборд ведётся ТОЛЬКО для Гонки.
+// Категории: race60/race90/race120 — «Гонка», endless_slow/endless_normal/endless_fast — «Бесконечная».
+
+const ALLOWED_CATEGORIES = [
+  'race60', 'race90', 'race120',
+  'endless_slow', 'endless_normal', 'endless_fast',
+];
+const DEFAULT_CATEGORY = 'race60';
+const CACHE_TOP = 100;
+const CACHE_TTL = 300;
+const RANK_CACHE_TTL = 60;
+const RATE_LIMIT_TTL = 3;
+const MAX_NAME_LENGTH = 64;
+const MAX_PHOTO_LENGTH = 512;
+const MAX_SIGN_PARAMS_LENGTH = 4096;
+// Потолок очков: яблоки съедаются не чаще одного шага змейки. Это защита от
+// абсурдных значений, а не точный античит.
+const SCORE_CAP_PER_SECOND = 6;
+// Поле 15x15: больше 225 яблок съесть невозможно.
+const MAX_ENDLESS_SCORE = 225;
+
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
+let warnedAboutMissingSecret = false;
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
@@ -14,27 +35,18 @@ export default {
 
     try {
       if (path === '/leaderboard' && method === 'GET') {
-        return handleCors(await getLeaderboard(env, url));
+        return await getLeaderboard(env, url);
       }
       if (path === '/rank' && method === 'GET') {
-        return handleCors(await getRank(env, url));
+        return await getRank(env, url);
       }
       if (path === '/submit' && method === 'POST') {
-        return handleCors(await submitScore(request, env));
+        return await submitScore(request, env);
       }
-      if (path === '/delete' && method === 'POST') {
-        return handleCors(await deleteUser(request, env));
-      }
-      return handleCors(new Response(JSON.stringify({ error: 'Not found' }), {
-        status: 404,
-        headers: { 'Content-Type': 'application/json' },
-      }));
+      return jsonResponse({ error: 'Not found' }, 404);
     } catch (err) {
       console.error('Request error:', err);
-      return handleCors(new Response(JSON.stringify({ error: 'Internal server error' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }));
+      return jsonResponse({ error: 'Internal server error' }, 500);
     }
   },
 };
@@ -47,11 +59,52 @@ function handleCors(response) {
   return response;
 }
 
-const CLIENT_SECRET = ''; // Legacy: вставьте Client Secret сюда ИЛИ (лучше) задайте env-секрет VK_CLIENT_SECRET через `wrangler secret put VK_CLIENT_SECRET`
+function jsonResponse(body, status = 200) {
+  return handleCors(new Response(JSON.stringify(body), { status, headers: JSON_HEADERS }));
+}
+
+function normalizeCategory(raw, { strict = false } = {}) {
+  const cat = typeof raw === 'string' ? raw.trim() : '';
+  if (!cat && !strict) return DEFAULT_CATEGORY;
+  return ALLOWED_CATEGORIES.includes(cat) ? cat : null;
+}
+
+function maxScoreFor(category) {
+  if (category.indexOf('endless_') === 0) return MAX_ENDLESS_SCORE;
+  const seconds = Number(category.replace('race', '')) || 0;
+  return Math.max(1, seconds) * SCORE_CAP_PER_SECOND;
+}
+
+function cleanText(value, maxLength) {
+  return String(value == null ? '' : value)
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim()
+    .slice(0, maxLength);
+}
+
+function cleanPhoto(value) {
+  const url = cleanText(value, MAX_PHOTO_LENGTH);
+  return /^https?:\/\//i.test(url) ? url : '';
+}
+
+function normalizeUserId(value) {
+  const uid = String(value == null ? '' : value).trim();
+  return /^[0-9]{1,20}$/.test(uid) ? uid : null;
+}
+
+function timingSafeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
 
 async function verifyVKSignature(paramsStr, secret) {
   if (!secret) {
-    console.warn('[WARNING] Секрет VK не установлен (VK_CLIENT_SECRET пуст). Подпись НЕ проверяется, принимаются все запросы!');
+    if (!warnedAboutMissingSecret) {
+      warnedAboutMissingSecret = true;
+      console.warn('[WARNING] VK_CLIENT_SECRET не задан: подпись не проверяется, рекорды принимаются от любого клиента.');
+    }
     return true;
   }
 
@@ -61,103 +114,74 @@ async function verifyVKSignature(paramsStr, secret) {
     if (!sign) return false;
 
     const ordered = [...params.entries()]
-      .filter(([k]) => k !== 'sign')
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, v]) => `${k}=${v}`)
+      .filter(([key]) => key !== 'sign')
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, value]) => `${key}=${value}`)
       .join('&');
 
-    const keyData = new TextEncoder().encode(CLIENT_SECRET);
-    const msgData = new TextEncoder().encode(ordered);
-
     const cryptoKey = await crypto.subtle.importKey(
-      'raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+      'raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
     );
-    const rawSig = await crypto.subtle.sign('HMAC', cryptoKey, msgData);
-    const hashHex = btoa(String.fromCharCode(...new Uint8Array(rawSig)))
+    const rawSig = await crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(ordered));
+    const hash = btoa(String.fromCharCode(...new Uint8Array(rawSig)))
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-    return hashHex === sign;
-  } catch (e) {
-    console.error('Signature verification error:', e);
+    return timingSafeEqual(hash, sign);
+  } catch (err) {
+    console.error('Signature verification error:', err);
     return false;
   }
 }
 
-// Категории лидерборда: race60 / race90 / race120 («Гонка»). Ограничиваем
-// имя, чтобы не разрастались ключи KV. Значение по умолчанию — 'default'.
-function categoryFromName(cat) {
-  const c = typeof cat === 'string' ? cat.trim().replace(/[^a-zA-Z0-9_-]/g, '') : '';
-  return (c && c.length <= 32) ? c : 'default';
-}
-
-const JSON_HEADERS = { 'Content-Type': 'application/json' };
-
+// Категория приходит из запроса, но попасть в KV может только из белого списка.
 async function getLeaderboard(env, url) {
   const kv = env.SNAKE_LB;
-  const category = categoryFromName(url.searchParams.get('category'));
+  const category = normalizeCategory(url.searchParams.get('category'));
+  if (!category) return jsonResponse({ success: false, error: 'Unknown category' }, 400);
+
   const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '20', 10) || 20));
   const cacheKey = '_index:' + category;
   const cached = await kv.get(cacheKey, { type: 'json' });
-  if (cached && Array.isArray(cached)) {
-    return new Response(JSON.stringify({ success: true, category, leaderboard: cached.slice(0, limit) }), {
-      status: 200,
-      headers: JSON_HEADERS,
-    });
+
+  if (Array.isArray(cached)) {
+    return jsonResponse({ success: true, category, leaderboard: cached.slice(0, limit) });
   }
 
-  const allUsers = await scanAllUsers(kv, category);
-  const top = allUsers
+  const top = (await scanAllUsers(kv, category))
     .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+    .slice(0, CACHE_TOP);
 
-  await kv.put(cacheKey, JSON.stringify(top), { expirationTtl: 300 });
+  // Кэшируем полный топ, а не обрезанный под конкретный limit.
+  await kv.put(cacheKey, JSON.stringify(top), { expirationTtl: CACHE_TTL });
 
-  return new Response(JSON.stringify({ success: true, category, leaderboard: top }), {
-    status: 200,
-    headers: JSON_HEADERS,
-  });
+  return jsonResponse({ success: true, category, leaderboard: top.slice(0, limit) });
 }
 
 async function getRank(env, url) {
   const kv = env.SNAKE_LB;
-  const category = categoryFromName(url.searchParams.get('category'));
-  const uid = url.searchParams.get('vk_user_id');
-  if (!uid) {
-    return new Response(JSON.stringify({ success: false, error: 'Missing vk_user_id' }), {
-      status: 400,
-      headers: JSON_HEADERS,
-    });
-  }
+  const category = normalizeCategory(url.searchParams.get('category'));
+  if (!category) return jsonResponse({ success: false, error: 'Unknown category' }, 400);
 
-  // кэш на 60 сек, чтобы не сканировать KV на каждый запрос ранга
+  const uid = normalizeUserId(url.searchParams.get('vk_user_id'));
+  if (!uid) return jsonResponse({ success: false, error: 'Missing or invalid vk_user_id' }, 400);
+
   const cacheKey = '_rank:' + category;
   let cached = await kv.get(cacheKey, { type: 'json' });
-  if (!cached || !Array.isArray(cached.scores) || Math.floor(Date.now() / 1000) - cached.ts > 60) {
+  if (!cached || !Array.isArray(cached.scores) || Math.floor(Date.now() / 1000) - cached.ts > RANK_CACHE_TTL) {
     const allUsers = await scanAllUsers(kv, category);
     allUsers.sort((a, b) => b.score - a.score);
-    const scores = allUsers.map((u) => u.score);
     const ts = Math.floor(Date.now() / 1000);
-    await kv.put(cacheKey, JSON.stringify({ ts, scores }), { expirationTtl: 120 });
-    cached = { ts, scores };
+    cached = { ts, scores: allUsers.map((user) => user.score) };
+    await kv.put(cacheKey, JSON.stringify(cached), { expirationTtl: RANK_CACHE_TTL * 2 });
   }
 
-  const userKey = `user:${category}:${uid}`;
-  const me = await kv.get(userKey, { type: 'json' });
+  const me = await kv.get(`user:${category}:${uid}`, { type: 'json' });
   if (!me) {
-    return new Response(JSON.stringify({ success: true, rank: null, total: cached.scores.length, score: null }), {
-      status: 200,
-      headers: JSON_HEADERS,
-    });
+    return jsonResponse({ success: true, rank: null, total: cached.scores.length, score: null });
   }
 
-  // ранг = сколько пользователей со строго большим счётом + 1
-  const above = cached.scores.filter((s) => s > me.score).length;
-  const rank = above + 1;
-
-  return new Response(JSON.stringify({ success: true, rank, total: cached.scores.length, score: me.score }), {
-    status: 200,
-    headers: JSON_HEADERS,
-  });
+  const above = cached.scores.filter((score) => score > me.score).length;
+  return jsonResponse({ success: true, rank: above + 1, total: cached.scores.length, score: me.score });
 }
 
 async function scanAllUsers(kv, category) {
@@ -169,9 +193,7 @@ async function scanAllUsers(kv, category) {
     const list = await kv.list({ prefix, cursor, limit: 1000 });
     for (const key of list.keys) {
       const user = await kv.get(key.name, { type: 'json' });
-      if (user && typeof user.score === 'number') {
-        results.push(user);
-      }
+      if (user && typeof user.score === 'number') results.push(user);
     }
     cursor = list.cursor;
   } while (cursor);
@@ -186,104 +208,84 @@ async function submitScore(request, env) {
   try {
     payload = await request.json();
   } catch {
-    return new Response(JSON.stringify({ success: false, error: 'Invalid JSON' }), {
-      status: 400,
-      headers: JSON_HEADERS,
-    });
+    return jsonResponse({ success: false, error: 'Invalid JSON' }, 400);
   }
 
-  const { vk_user_id, first_name, last_name, photo_100, score, vk_sign_params, category } = payload || {};
-
-  if (!vk_user_id || typeof score !== 'number' || score < 0) {
-    return new Response(JSON.stringify({ success: false, error: 'Missing or invalid fields: vk_user_id, score' }), {
-      status: 400,
-      headers: JSON_HEADERS,
-    });
+  if (!payload || typeof payload !== 'object') {
+    return jsonResponse({ success: false, error: 'Invalid payload' }, 400);
   }
 
-  const secret = (env && env.VK_CLIENT_SECRET) || CLIENT_SECRET;
+  const uid = normalizeUserId(payload.vk_user_id);
+  const category = normalizeCategory(payload.category, { strict: true });
+  const score = payload.score;
 
-  if (vk_sign_params) {
-    const valid = await verifyVKSignature(vk_sign_params, secret);
-    if (!valid) {
-      return new Response(JSON.stringify({ success: false, error: 'Invalid VK signature' }), {
-        status: 403,
-        headers: JSON_HEADERS,
-      });
+  if (!uid) return jsonResponse({ success: false, error: 'Missing or invalid vk_user_id' }, 400);
+  if (!category) return jsonResponse({ success: false, error: 'Unknown category' }, 400);
+  if (!Number.isInteger(score) || score < 0 || score > maxScoreFor(category)) {
+    return jsonResponse({ success: false, error: 'Invalid score' }, 400);
+  }
+
+  const signParams = payload.vk_sign_params;
+  if (signParams != null && (typeof signParams !== 'string' || signParams.length > MAX_SIGN_PARAMS_LENGTH)) {
+    return jsonResponse({ success: false, error: 'Invalid vk_sign_params' }, 400);
+  }
+
+  const secret = (env && env.VK_CLIENT_SECRET) || '';
+  if (secret && !signParams) {
+    return jsonResponse({ success: false, error: 'vk_sign_params required' }, 400);
+  }
+  if (signParams) {
+    // Подпись подтверждает launch-параметры конкретного игрока, поэтому uid из
+    // подписанной строки должен совпадать с uid, за который отправляют рекорд.
+    const signedUid = normalizeUserId(new URLSearchParams(signParams).get('vk_user_id'));
+    if (signedUid !== uid) {
+      return jsonResponse({ success: false, error: 'Signature does not match vk_user_id' }, 403);
     }
-  } else if (secret) {
-    return new Response(JSON.stringify({ success: false, error: 'vk_sign_params required' }), {
-      status: 400,
-      headers: JSON_HEADERS,
-    });
+    if (!(await verifyVKSignature(signParams, secret))) {
+      return jsonResponse({ success: false, error: 'Invalid VK signature' }, 403);
+    }
   }
 
-  const cat = categoryFromName(category);
-  const userKey = `user:${cat}:${vk_user_id}`;
+  const rateKey = `_rl:${category}:${uid}`;
+  if (await kv.get(rateKey)) {
+    return jsonResponse({ success: false, error: 'Too many requests' }, 429);
+  }
+  await kv.put(rateKey, '1', { expirationTtl: RATE_LIMIT_TTL });
+
+  const userKey = `user:${category}:${uid}`;
   const existing = await kv.get(userKey, { type: 'json' });
-  const existingScore = existing?.score || 0;
+  const existingScore = existing && typeof existing.score === 'number' ? existing.score : 0;
 
   if (existing && score <= existingScore) {
-    return new Response(JSON.stringify({
+    return jsonResponse({
       success: true,
       updated: false,
       score: existingScore,
       message: 'New score is not higher than current record',
-    }), {
-      status: 200,
-      headers: JSON_HEADERS,
     });
   }
 
   const record = {
-    vk_user_id,
-    first_name: first_name || 'Игрок',
-    last_name: last_name || '',
-    photo_100: photo_100 || '',
+    vk_user_id: uid,
+    first_name: cleanText(payload.first_name, MAX_NAME_LENGTH) || 'Игрок',
+    last_name: cleanText(payload.last_name, MAX_NAME_LENGTH),
+    photo_100: cleanPhoto(payload.photo_100),
     score,
-    category: cat,
+    category,
     updated_at: Date.now(),
   };
 
   await kv.put(userKey, JSON.stringify(record));
-  await kv.delete('_index:' + cat);
+  await Promise.all([
+    kv.delete('_index:' + category),
+    kv.delete('_rank:' + category),
+  ]);
 
-  return new Response(JSON.stringify({
+  return jsonResponse({
     success: true,
     updated: true,
     previous_score: existingScore,
     new_score: score,
     record,
-  }), {
-    status: 200,
-    headers: JSON_HEADERS,
-  });
-}
-
-async function deleteUser(request, env) {
-  const kv = env.SNAKE_LB;
-  let payload;
-  try {
-    payload = await request.json();
-  } catch {
-    return new Response(JSON.stringify({ success: false, error: 'Invalid JSON' }), {
-      status: 400,
-      headers: JSON_HEADERS,
-    });
-  }
-  const { vk_user_id, category } = payload || {};
-  if (!vk_user_id) {
-    return new Response(JSON.stringify({ success: false, error: 'Missing vk_user_id' }), {
-      status: 400,
-      headers: JSON_HEADERS,
-    });
-  }
-  const cat = categoryFromName(category);
-  const userKey = `user:${cat}:${vk_user_id}`;
-  await kv.delete(userKey);
-  await kv.delete('_index:' + cat);
-  return new Response(JSON.stringify({ success: true, deleted: vk_user_id, category: cat }), {
-    status: 200,
-    headers: JSON_HEADERS,
   });
 }

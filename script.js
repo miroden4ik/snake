@@ -45,6 +45,12 @@
   const lbModalBg = document.getElementById('lb-modal-bg');
   const lbList = document.getElementById('lb-list');
   const lbTabs = document.querySelectorAll('.lb-tab');
+  const lbTitle = document.getElementById('lb-title');
+  const lbHint = document.getElementById('lb-hint');
+  const countdownOverlay = document.getElementById('countdown-overlay');
+  const countdownText = document.getElementById('countdown-text');
+  const recordBadge = document.getElementById('record-badge');
+  const earnedCoinsEl = document.getElementById('earned-coins');
   const userChip = document.getElementById('user-chip');
   const userAvatar = document.getElementById('user-avatar');
   const userName = document.getElementById('user-name');
@@ -77,6 +83,7 @@
   const shopItemsEl = document.getElementById('shop-items');
   const shopTabs = document.querySelectorAll('.shop-tab');
   const shopCoinsCount = document.getElementById('shop-coins-count');
+  const shopHintEl = document.getElementById('shop-hint');
 
   // ---------- Constants ----------
   const GRID = 15;
@@ -86,6 +93,15 @@
   const MODE_RACE = 'race';
   const RACE_DURATIONS = [60, 90, 120];
   const DEFAULT_RACE_DURATION = 60;
+  // категории лидерборда «Бесконечной» по скоростям
+  const ENDLESS_LB_CATEGORIES = {
+    slow: 'endless_slow',
+    normal: 'endless_normal',
+    fast: 'endless_fast',
+  };
+  const SAVE_TTL_MS = 24 * 60 * 60 * 1000;
+  const COUNTDOWN_STEP_MS = 620;
+  const COUNTDOWN_GO_MS = 420;
   // скорости «Бесконечной» (мс на шаг): медленная / средняя / высокая
   const ENDLESS_SPEEDS = {
     slow: 260,
@@ -118,6 +134,11 @@
   const COINS_KEY = 'snake_coins';
   const OWNED_KEY = 'snake_owned_items';
   const EQUIPPED_KEY = 'snake_equipped_items';
+  const PROFILE_KEY = 'snake_profile';
+  const PROFILE_TS_KEY = 'snake_profile_ts';
+  const PROFILE_SYNC_DELAY = 1500;
+  const DEFAULT_OWNED = ['snake_default', 'food_apple', 'acc_none', 'bg_default'];
+  const DEFAULT_EQUIPPED = { snake: 'snake_default', food: 'food_apple', accessory: 'acc_none', background: 'bg_default' };
 
   const SHOP_CATALOG = {
     snake: [
@@ -187,21 +208,30 @@
     try {
       const raw = store.get(OWNED_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
-      return (parsed && Array.isArray(parsed)) ? parsed : ['snake_default', 'food_apple', 'acc_none', 'bg_default'];
+      return (parsed && Array.isArray(parsed)) ? parsed : DEFAULT_OWNED.slice();
     } catch (_) {
-      return ['snake_default', 'food_apple', 'acc_none', 'bg_default'];
+      return DEFAULT_OWNED.slice();
     }
   })();
   let equippedItems = (() => {
     try {
       const raw = store.get(EQUIPPED_KEY);
       const parsed = raw ? JSON.parse(raw) : null;
-      return (parsed && typeof parsed === 'object') ? parsed : { snake: 'snake_default', food: 'food_apple', accessory: 'acc_none', background: 'bg_default' };
+      return (parsed && typeof parsed === 'object') ? parsed : { ...DEFAULT_EQUIPPED };
     } catch (_) {
-      return { snake: 'snake_default', food: 'food_apple', accessory: 'acc_none', background: 'bg_default' };
+      return { ...DEFAULT_EQUIPPED };
     }
   })();
   let currentShopCategory = 'snake';
+  let profileTs = Number(store.get(PROFILE_TS_KEY) || 0) || 0;
+  let profileSyncTimer = null;
+  let coinsEarned = 0;
+  let countdownActive = false;
+  let countdownTimer = null;
+  let countdownSeq = 0;
+  let countdownDoneCb = null;
+  let rankReqSeq = 0;
+  let startRankCache = { category: '', data: null, ts: 0 };
 
   let snake = [];
   let prevSnake = [];
@@ -241,9 +271,63 @@
     bestEndless[endlessSpeedDefault] = legacyEndless;
     store.set(BEST_ENDLESS_KEY(endlessSpeedDefault), String(legacyEndless));
   }
-  // сохранённая партия: {saved: bool, mode, score, snake, dir, nextDir, food, raceLeftMs, raceEndAt}
-  let savedGame = null;
-  try { const raw = store.get(SAVE_KEY); if (raw) savedGame = JSON.parse(raw) || null; } catch (_) { savedGame = null; }
+  // сохранённая партия: {saved: bool, savedAt, mode, score, snake, dir, nextDir, food, raceLeftMs}
+  function isValidSavedGame(st) {
+    if (!st || st.saved !== true) return false;
+    if (st.mode !== MODE_ENDLESS && st.mode !== MODE_RACE) return false;
+    if (!Number.isInteger(st.score) || st.score < 0 || st.score > GRID * GRID) return false;
+    if (!Array.isArray(st.snake) || st.snake.length < 1 || st.snake.length > GRID * GRID) return false;
+    const seen = new Set();
+    for (const seg of st.snake) {
+      if (!seg || !Number.isInteger(seg.x) || !Number.isInteger(seg.y)) return false;
+      if (seg.x < 0 || seg.x >= GRID || seg.y < 0 || seg.y >= GRID) return false;
+      const key = seg.y * GRID + seg.x;
+      if (seen.has(key)) return false;
+      seen.add(key);
+    }
+    const isDir = (d) => d && Number.isInteger(d.x) && Number.isInteger(d.y)
+      && Math.abs(d.x) + Math.abs(d.y) === 1;
+    if (!isDir(st.dir) || !isDir(st.nextDir)) return false;
+    if (st.food != null) {
+      if (!Number.isInteger(st.food.x) || !Number.isInteger(st.food.y)) return false;
+      if (st.food.x < 0 || st.food.x >= GRID || st.food.y < 0 || st.food.y >= GRID) return false;
+    }
+    if (st.mode === MODE_ENDLESS && !ENDLESS_SPEED_NAMES.includes(st.endlessSpeed)) return false;
+    if (st.mode === MODE_RACE) {
+      const dur = Number(st.raceDuration);
+      if (!Number.isFinite(dur) || dur <= 0) return false;
+      const left = Number(st.raceLeftMs);
+      if (!Number.isFinite(left) || left < 0) return false;
+    }
+    if (st.coinsEarned != null) {
+      if (!Number.isInteger(st.coinsEarned) || st.coinsEarned < 0 || st.coinsEarned > GRID * GRID) return false;
+    }
+    return true;
+  }
+
+  function readSavedGame() {
+    let st = null;
+    try { const raw = store.get(SAVE_KEY); if (raw) st = JSON.parse(raw) || null; } catch (_) { st = null; }
+    if (!isValidSavedGame(st)) {
+      if (st) store.remove(SAVE_KEY);
+      return null;
+    }
+    const ts = Number(st.savedAt) || 0;
+    if (!ts) {
+      // старые сохранения без метки времени считаем свежими и мигрируем
+      st.savedAt = Date.now();
+      try { store.set(SAVE_KEY, JSON.stringify(st)); } catch (_) {}
+    } else if (ts > Date.now() + 60000) {
+      st.savedAt = Date.now();
+      try { store.set(SAVE_KEY, JSON.stringify(st)); } catch (_) {}
+    } else if (Date.now() - ts > SAVE_TTL_MS) {
+      store.remove(SAVE_KEY);
+      return null;
+    }
+    return st;
+  }
+
+  let savedGame = readSavedGame();
 
   // dev/test helper: ?race=5 запускает Гонку на 5 секунд (дробные тоже можно)
   let urlRaceOverride = 0;
@@ -265,10 +349,12 @@
   let vkSignParamsStr = '';
 
   // VK Storage — ключи рекордов (синк между устройствами, как в Fruit Blast)
+  const PROFILE_VERSION = 1;
   const VK_STORAGE = {
     bestEndless: (s) => 'snakeBestScore' + (s ? s[0].toUpperCase() + s.slice(1) : ''),
     legacyEndless: 'snakeBestScore',
     bestRace: (d) => 'snakeBestRace' + d,
+    profile: PROFILE_KEY,
     all: () => ENDLESS_SPEED_NAMES.map((s) => VK_STORAGE.bestEndless(s))
       .concat(RACE_DURATIONS.map((d) => VK_STORAGE.bestRace(d))),
   };
@@ -354,6 +440,128 @@
     }).catch(() => {});
   }
 
+  // ---------- VK Storage: монеты и покупки ----------
+  function sanitizeOwnedIds(list) {
+    const owned = new Set(DEFAULT_OWNED);
+    if (Array.isArray(list)) {
+      list.forEach((id) => {
+        if (typeof id === 'string' && getItemById(id)) owned.add(id);
+      });
+    }
+    return Array.from(owned);
+  }
+
+  function sanitizeEquippedMap(raw, owned) {
+    const equipped = { ...DEFAULT_EQUIPPED };
+    const src = raw && typeof raw === 'object' ? raw : {};
+    SHOP_CATEGORIES.forEach((cat) => {
+      const id = src[cat];
+      if (typeof id !== 'string' || !owned.includes(id)) return;
+      if (SHOP_CATALOG[cat].some((item) => item.id === id)) equipped[cat] = id;
+    });
+    return equipped;
+  }
+
+  function sanitizeProfile(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const owned = sanitizeOwnedIds(raw.owned);
+    return {
+      v: PROFILE_VERSION,
+      ts: Math.max(0, Math.floor(Number(raw.ts) || 0)),
+      coins: Math.max(0, Math.floor(Number(raw.coins) || 0)),
+      owned,
+      equipped: sanitizeEquippedMap(raw.equipped, owned),
+    };
+  }
+
+  function buildProfile() {
+    return sanitizeProfile({
+      v: PROFILE_VERSION,
+      ts: profileTs,
+      coins,
+      owned: ownedItems,
+      equipped: equippedItems,
+    });
+  }
+
+  function saveLocalProfile(profile) {
+    store.set(COINS_KEY, String(profile.coins));
+    try { store.set(OWNED_KEY, JSON.stringify(profile.owned)); } catch (_) {}
+    try { store.set(EQUIPPED_KEY, JSON.stringify(profile.equipped)); } catch (_) {}
+    store.set(PROFILE_TS_KEY, String(profile.ts));
+  }
+
+  function applyProfile(profile) {
+    if (!profile) return;
+    coins = profile.coins;
+    ownedItems = profile.owned.slice();
+    equippedItems = { ...profile.equipped };
+    profileTs = profile.ts;
+    saveLocalProfile(profile);
+    updateCoinsUI();
+    if (shopModal.classList.contains('active')) renderShopItems();
+  }
+
+  function mergeProfiles(local, remote) {
+    if (!remote) return local;
+    if (!local) return remote;
+    // при равных метках доверяем облаку: локальные изменения всегда свежее
+    const newer = remote.ts >= local.ts ? remote : local;
+    const owned = Array.from(new Set(local.owned.concat(remote.owned)));
+    return {
+      v: PROFILE_VERSION,
+      ts: Math.max(local.ts, remote.ts),
+      coins: newer.coins,
+      owned,
+      equipped: sanitizeEquippedMap(newer.equipped, owned),
+    };
+  }
+
+  function pushProfileToVk(profile) {
+    if (!vkAvailable() || !profile) return Promise.resolve();
+    return vkStorageSet(VK_STORAGE.profile, JSON.stringify(profile));
+  }
+
+  function syncProfileFromVk() {
+    if (!vkAvailable()) return Promise.resolve();
+    return vkStorageGetBatch([VK_STORAGE.profile]).then((remote) => {
+      const raw = remote[VK_STORAGE.profile];
+      let remoteProfile = null;
+      if (raw) {
+        try { remoteProfile = sanitizeProfile(JSON.parse(raw)); } catch (_) { remoteProfile = null; }
+      }
+      const merged = mergeProfiles(buildProfile(), remoteProfile);
+      if (!merged) return;
+      applyProfile(merged);
+      const remoteJson = remoteProfile ? JSON.stringify(remoteProfile) : '';
+      const mergedJson = JSON.stringify(merged);
+      // пишем обратно и если облако содержало мусор, который санитайзер отбросил
+      if (mergedJson !== remoteJson || (raw && raw !== remoteJson)) pushProfileToVk(merged);
+    }).catch(() => {});
+  }
+
+  function scheduleProfileSync() {
+    if (!vkAvailable() || profileSyncTimer) return;
+    profileSyncTimer = setTimeout(() => {
+      profileSyncTimer = null;
+      pushProfileToVk(buildProfile());
+    }, PROFILE_SYNC_DELAY);
+  }
+
+  function flushProfileSync() {
+    if (profileSyncTimer) {
+      clearTimeout(profileSyncTimer);
+      profileSyncTimer = null;
+    }
+    pushProfileToVk(buildProfile());
+  }
+
+  function markProfileChanged() {
+    profileTs = Date.now();
+    store.set(PROFILE_TS_KEY, String(profileTs));
+    scheduleProfileSync();
+  }
+
   function getVKLaunchParamsStr() {
     try {
       const full = ((window.location.search || '') + '&' + (window.location.hash || '').replace(/^#/, '')).replace(/^&/, '');
@@ -377,6 +585,7 @@
       if (uid) currentUser.vk_user_id = Number(uid) || uid;
     } catch (_) { /* игнор */ }
     syncBestScoresFromVk();
+    syncProfileFromVk();
     if (!vkAvailable()) return;
     vkBridge.send('VKWebAppInit', {}).then(() =>
       vkBridge.send('VKWebAppGetUserInfo', {}).then((res) => {
@@ -389,6 +598,8 @@
           currentUser.photo_100 = res.photo_100 || '';
           applyUserChip();
           syncBestScoresFromVk();
+          syncProfileFromVk();
+          applyModeUI();
         }
       }).catch(() => {
         // профиль не получен (нет авторизации/ошибка): если знаем vk_user_id
@@ -403,7 +614,7 @@
   initVk();
 
   function lbCategory() {
-    return MODE_RACE + raceDuration;
+    return mode === MODE_RACE ? MODE_RACE + raceDuration : ENDLESS_LB_CATEGORIES[endlessSpeed];
   }
 
   function getBest() {
@@ -425,6 +636,15 @@
   function fmtDur(sec) {
     const s = Math.max(0, Math.floor(sec));
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  function plural(n, forms) {
+    const abs = Math.abs(n) % 100;
+    const last = abs % 10;
+    if (abs > 10 && abs < 20) return forms[2];
+    if (last > 1 && last < 5) return forms[1];
+    if (last === 1) return forms[0];
+    return forms[2];
   }
 
   // ---------- Звук и вибрация (Web Audio, без файлов) ----------
@@ -473,6 +693,15 @@
       if (!ensureAudio()) return;
       playTone(500, 0, 0.06, 'sine', 0.12);
     },
+    tick() {
+      if (!ensureAudio()) return;
+      playTone(520, 0, 0.08, 'triangle', 0.14);
+    },
+    go() {
+      if (!ensureAudio()) return;
+      playTone(760, 0, 0.14, 'triangle', 0.18);
+      playTone(1040, 0.09, 0.14, 'triangle', 0.14);
+    },
     toggleMute() {
       sfxMuted = !sfxMuted;
       store.set('snake_sfx_muted', sfxMuted ? '1' : '0');
@@ -495,6 +724,7 @@
     store.set(COINS_KEY, String(coins));
     try { store.set(OWNED_KEY, JSON.stringify(ownedItems)); } catch (_) {}
     try { store.set(EQUIPPED_KEY, JSON.stringify(equippedItems)); } catch (_) {}
+    markProfileChanged();
   }
 
   function updateCoinsUI() {
@@ -939,6 +1169,11 @@
   function renderShopItems() {
     const cat = currentShopCategory;
     const items = SHOP_CATALOG[cat] || [];
+    if (shopHintEl) {
+      shopHintEl.textContent = coins === 0
+        ? 'Монет пока нет. Съешь яблоко в игре — получишь 1 монету.'
+        : 'Кушай яблоки и получай монеты! 1 яблоко = 1 монета.';
+    }
     shopItemsEl.innerHTML = '';
     const frag = document.createDocumentFragment();
     items.forEach((item) => {
@@ -952,9 +1187,6 @@
       if (cat === 'background') {
         const bgDiv = document.createElement('div');
         bgDiv.className = 'shop-preview-bg';
-        const tmpCanvas = document.createElement('canvas');
-        renderPreview(tmpCanvas, 'background', item);
-        // Получаем фон через canvas
         const styleItem = item;
         if (styleItem.type === 'solid') {
           bgDiv.style.background = styleItem.color;
@@ -967,8 +1199,9 @@
         const miniC = document.createElement('canvas');
         miniC.style.position = 'relative';
         miniC.style.zIndex = '1';
-        miniC.style.width = '70%'; miniC.style.height = '70%';
         renderPreview(miniC, 'snake', getEquipped('snake'));
+        miniC.style.width = '70%';
+        miniC.style.height = '70%';
         prev.appendChild(miniC);
       } else {
         const cvs = document.createElement('canvas');
@@ -1000,6 +1233,12 @@
           price.textContent = item.price;
           priceRow.append(coinSvg, price);
           btnRow.appendChild(priceRow);
+          if (coins < item.price) {
+            const missing = document.createElement('span');
+            missing.className = 'shop-missing';
+            missing.textContent = 'Не хватает ' + (item.price - coins);
+            btnRow.appendChild(missing);
+          }
         }
       }
 
@@ -1599,6 +1838,7 @@
 
     if (willEat) {
       score++;
+      coinsEarned += COINS_PER_APPLE;
       scoreEl.textContent = score;
       addCoins(COINS_PER_APPLE);
       moveDuration = calcMoveDuration(score);
@@ -1655,7 +1895,7 @@
   }
 
   function setPaused(p) {
-    if (!running || gameOver || paused === p) return;
+    if (!running || gameOver || countdownActive || paused === p) return;
     paused = p;
     pauseOverlay.classList.toggle('hidden', !p);
     if (p) {
@@ -1668,6 +1908,65 @@
       moveStart = performance.now();
       startLoop();
     }
+  }
+
+  function cancelCountdown() {
+    countdownSeq++;
+    countdownActive = false;
+    countdownDoneCb = null;
+    if (countdownTimer) {
+      clearTimeout(countdownTimer);
+      countdownTimer = null;
+    }
+    countdownOverlay.classList.add('hidden');
+    countdownText.classList.remove('pop', 'go');
+  }
+
+  function beginCountdown(onDone) {
+    cancelCountdown();
+    countdownActive = true;
+    countdownDoneCb = onDone;
+    const seq = countdownSeq;
+    countdownOverlay.classList.remove('hidden');
+    const steps = ['3', '2', '1', 'Поехали!'];
+    let i = 0;
+    const tick = () => {
+      if (seq !== countdownSeq || !countdownActive) return;
+      if (i >= steps.length) {
+        const cb = countdownDoneCb;
+        countdownActive = false;
+        countdownDoneCb = null;
+        countdownOverlay.classList.add('hidden');
+        countdownText.classList.remove('pop');
+        if (cb) cb();
+        return;
+      }
+      const isGo = i === steps.length - 1;
+      countdownText.textContent = steps[i];
+      countdownText.classList.toggle('go', isGo);
+      countdownText.classList.remove('pop');
+      void countdownText.offsetWidth;
+      countdownText.classList.add('pop');
+      if (isGo) sfx.go(); else sfx.tick();
+      i++;
+      countdownTimer = setTimeout(tick, isGo ? COUNTDOWN_GO_MS : COUNTDOWN_STEP_MS);
+    };
+    tick();
+  }
+
+  // если игра ушла в фон прямо во время отсчёта — сразу доигрываем его и ставим паузу
+  function finishCountdownNow() {
+    if (!countdownActive) return;
+    const cb = countdownDoneCb;
+    cancelCountdown();
+    if (cb) cb();
+  }
+
+  function autoPause() {
+    if (!running || gameOver || paused) return;
+    if (countdownActive) finishCountdownNow();
+    saveGame();
+    setPaused(true);
   }
 
   // ---------- Screen switching ----------
@@ -1694,13 +1993,17 @@
     if (!running) return;
     const st = {
       saved: true,
+      savedAt: Date.now(),
       mode,
       score,
+      coinsEarned,
       snake: snake.map(seg => ({ x: seg.x, y: seg.y })),
       dir: { ...dir },
       nextDir: { ...nextDir },
       food: food ? { ...food } : null,
-      raceLeftMs: mode === MODE_RACE ? Math.max(0, raceEndAt - performance.now()) : 0,
+      raceLeftMs: mode === MODE_RACE
+        ? (raceEndAt ? Math.max(0, raceEndAt - performance.now()) : raceDuration * 1000)
+        : 0,
       raceDuration,
       endlessSpeed,
     };
@@ -1719,7 +2022,7 @@
       startGame();
       return;
     }
-    if (savedGame.mode === MODE_RACE) raceDuration = savedGame.raceDuration || DEFAULT_RACE_DURATION;
+    if (savedGame.mode === MODE_RACE) raceDuration = Number(savedGame.raceDuration) || DEFAULT_RACE_DURATION;
     mode = savedGame.mode;
     store.set(MODE_KEY, mode);
     if (mode === MODE_ENDLESS) {
@@ -1732,32 +2035,41 @@
     nextDir = { ...savedGame.nextDir };
     food = savedGame.food ? { ...savedGame.food } : null;
     score = savedGame.score || 0;
+    coinsEarned = Math.max(0, Number(savedGame.coinsEarned) || 0);
     moveDuration = calcMoveDuration(score);
     gameOver = false;
     paused = false;
     pauseOverlay.classList.add('hidden');
     running = true;
+    cancelCountdown();
 
     scoreEl.textContent = score;
     timerChipEl.classList.toggle('hidden', mode !== MODE_RACE);
+    const savedLeft = Number(savedGame.raceLeftMs);
+    const raceLeftMs = savedGame.raceLeftMs != null && Number.isFinite(savedLeft) && savedLeft >= 0
+      ? savedLeft
+      : raceDuration * 1000;
+    raceEndAt = 0;
     if (mode === MODE_RACE) {
-      raceEndAt = performance.now() + (savedGame.raceLeftMs != null ? savedGame.raceLeftMs : raceDuration * 1000);
-      timerEl.textContent = fmtDur(Math.ceil((raceEndAt - performance.now()) / 1000));
+      timerEl.textContent = fmtDur(Math.ceil(raceLeftMs / 1000));
       timerEl.classList.remove('low');
-    } else {
-      raceEndAt = 0;
     }
     if (!food) spawnFood();
     clearSave();
     showScreen('game');
     requestAnimationFrame(() => {
       sizeCanvas();
-      startLoop();
+      draw(0);
+      beginCountdown(() => {
+        if (mode === MODE_RACE) raceEndAt = performance.now() + Math.max(0, raceLeftMs);
+        startLoop();
+      });
     });
   }
 
   // ---------- Start / end ----------
   function startGame() {
+    cancelCountdown();
     clearSave();
     updateContinueBtn();
     const startX = Math.floor(GRID / 2);
@@ -1770,6 +2082,7 @@
     dir = { x: 1, y: 0 };
     nextDir = { x: 1, y: 0 };
     score = 0;
+    coinsEarned = 0;
     moveDuration = calcMoveDuration(0);
     gameOver = false;
     paused = false;
@@ -1778,7 +2091,7 @@
 
     scoreEl.textContent = 0;
     timerChipEl.classList.toggle('hidden', mode !== MODE_RACE);
-    raceEndAt = performance.now() + raceDuration * 1000;
+    raceEndAt = 0;
     timerEl.textContent = fmtDur(raceDuration);
     timerEl.classList.remove('low');
     spawnFood();
@@ -1786,11 +2099,16 @@
     showScreen('game');
     requestAnimationFrame(() => {
       sizeCanvas();
-      startLoop();
+      draw(0);
+      beginCountdown(() => {
+        if (mode === MODE_RACE) raceEndAt = performance.now() + raceDuration * 1000;
+        startLoop();
+      });
     });
   }
 
   function endGame(won = false, timedOut = false) {
+    cancelCountdown();
     running = false;
     gameOver = true;
     paused = false;
@@ -1798,33 +2116,36 @@
     stopLoop();
     clearSave();
 
-    if (score > getBest()) {
-      setBest(score);
-    }
+    const prevBest = getBest();
+    const isNewRecord = score > 0 && score > prevBest;
+    if (score > prevBest) setBest(score);
 
     const isRace = mode === MODE_RACE;
-    overTitleEl.textContent = won ? 'Победа!' : (isRace ? 'Время вышло!' : 'Игра окончена');
-    overTitleEl.classList.toggle('race-timeout', isRace && !won);
+    overTitleEl.textContent = won ? 'Победа!' : (timedOut ? 'Время вышло!' : 'Игра окончена');
+    overTitleEl.classList.toggle('race-timeout', timedOut);
+    recordBadge.classList.toggle('hidden', !isNewRecord);
     if (won) { sfx.win(); vibrate([40, 60, 40]); }
     else { sfx.die(); vibrate(120); }
     finalScoreEl.textContent = score;
+    earnedCoinsEl.textContent = coinsEarned;
     bestScoreEl.textContent = getBest();
     lbStatusEl.textContent = '';
     lbStatusEl.classList.remove('fail');
-    if (isRace) {
-      btnLeadersOver.classList.remove('hidden');
-      lbSubmit(score);
-    } else {
-      btnLeadersOver.classList.add('hidden');
+    if (isRace && timedOut) {
+      timerEl.textContent = fmtDur(0);
+      timerEl.classList.remove('low');
     }
+    btnLeadersOver.classList.remove('hidden');
+    startRankCache.ts = 0;
+    if (LB_ENABLED && score > 0) lbSubmit(score);
     showScreen('over');
   }
 
-  // ---------- Leaderboard (только «Гонка») ----------
-  async function lbSubmitRank() {
+  // ---------- Leaderboard (Гонка и Бесконечная) ----------
+  async function lbFetchRank(category) {
     if (!LB_ENABLED || !currentUser.vk_user_id) return null;
     try {
-      const res = await fetch(CONFIG_URL + '/rank?category=' + encodeURIComponent(lbCategory()) + '&vk_user_id=' + encodeURIComponent(currentUser.vk_user_id), {
+      const res = await fetch(CONFIG_URL + '/rank?category=' + encodeURIComponent(category) + '&vk_user_id=' + encodeURIComponent(currentUser.vk_user_id), {
         headers: { 'Accept': 'application/json' },
       });
       if (!res.ok) return null;
@@ -1833,6 +2154,39 @@
     } catch (_) {
       return null;
     }
+  }
+
+  function lbSubmitRank() {
+    return lbFetchRank(lbCategory());
+  }
+
+  function updateStartBestText(rankData) {
+    const best = getBest();
+    let text = 'Рекорд: ' + best;
+    if (rankData && rankData.rank) text += ' · #' + rankData.rank + ' в топе';
+    modeBestEl.textContent = text;
+  }
+
+  function refreshStartRank() {
+    const category = lbCategory();
+    if (startRankCache.category === category && Date.now() - startRankCache.ts < 60000) {
+      updateStartBestText(startRankCache.data);
+      return;
+    }
+    if (!LB_ENABLED || !currentUser.vk_user_id) {
+      startRankCache = { category, data: null, ts: Date.now() };
+      updateStartBestText(null);
+      return;
+    }
+    updateStartBestText(startRankCache.category === category ? startRankCache.data : null);
+    const seq = ++rankReqSeq;
+    lbFetchRank(category).then((data) => {
+      if (seq !== rankReqSeq) return;
+      startRankCache = { category, data, ts: Date.now() };
+      if (mode === (category.indexOf('race') === 0 ? MODE_RACE : MODE_ENDLESS) && lbCategory() === category) {
+        updateStartBestText(data);
+      }
+    });
   }
 
   async function lbSubmit(score) {
@@ -1860,6 +2214,7 @@
       // показываем место игрока в категории
       const rankData = await lbSubmitRank();
       if (rankData) {
+        startRankCache = { category: lbCategory(), data: rankData, ts: Date.now() };
         const place = rankData.rank;
         const total = rankData.total || 0;
         if (data && data.updated) {
@@ -1888,18 +2243,20 @@
       const res = await fetch(CONFIG_URL + '/leaderboard?category=' + encodeURIComponent(category) + '&limit=10', {
         headers: { 'Accept': 'application/json' },
       });
-      if (!res.ok) return [];
+      if (!res.ok) return null;
       const data = await res.json();
-      return (data && data.success && Array.isArray(data.leaderboard)) ? data.leaderboard : [];
+      if (!data || !data.success || !Array.isArray(data.leaderboard)) return null;
+      return data.leaderboard;
     } catch (_) {
-      return [];
+      return null;
     }
   }
 
-  function lbRender(list) {
+  function lbRender(list, category) {
     lbList.innerHTML = '';
     if (!Array.isArray(list) || list.length === 0) {
-      lbList.innerHTML = '<div class="lb-empty">Пока нет рекордов.<br>Стань первым в Гонке!</div>';
+      const place = category && category.indexOf('race') === 0 ? 'Гонке' : 'Бесконечной';
+      lbList.innerHTML = '<div class="lb-empty">Пока нет рекордов.<br>Стань первым в ' + place + '!</div>';
       return;
     }
     const frag = document.createDocumentFragment();
@@ -1936,13 +2293,21 @@
 
   async function lbOpen(category) {
     lbModal.classList.add('active');
+    lbTabs.forEach((t) => {
+      t.classList.toggle('hidden', t.dataset.mode !== mode);
+      t.classList.toggle('active', t.dataset.cat === category);
+    });
     lbList.innerHTML = '<div class="lb-empty">Загрузка…</div>';
     if (!LB_ENABLED) {
       lbList.innerHTML = '<div class="lb-empty">Лидерборд ещё не подключён.<br>Заполни WORKER_URL в js/config.js.</div>';
       return;
     }
     const list = await lbFetch(category);
-    lbRender(list.slice(0, 10));
+    if (list === null) {
+      lbList.innerHTML = '<div class="lb-empty">Не удалось загрузить топ.<br>Попробуй позже.</div>';
+      return;
+    }
+    lbRender(list.slice(0, 10), category);
   }
 
   function lbClose() {
@@ -1959,11 +2324,19 @@
     durChips.forEach((c) => c.classList.toggle('active', Number(c.dataset.sec) === raceDuration));
     speedChips.forEach((c) => c.classList.toggle('active', c.dataset.speed === endlessSpeed));
     subtitleEl.textContent = isRace
-      ? 'Съешь как можно больше яблок за ' + raceDuration + ' секунд!'
+      ? 'Съешь как можно больше яблок за ' + raceDuration + ' ' + plural(raceDuration, ['секунду', 'секунды', 'секунд']) + '!'
       : 'Собирай яблоки и расти!';
-    modeBestEl.textContent = 'Рекорд: ' + getBest();
-    btnLeaders.classList.toggle('hidden', !isRace);
-    lbTabs.forEach((t) => t.classList.toggle('active', t.dataset.cat === lbCategory()));
+    lbTitle.textContent = isRace ? 'Лидеры · Гонка' : 'Лидеры · Бесконечная';
+    lbHint.textContent = isRace
+      ? 'Яблок за отведённое время. Топ-10 по каждой длительности.'
+      : 'Яблок за партию. Топ-10 по каждой скорости.';
+    btnLeaders.classList.remove('hidden');
+    lbTabs.forEach((t) => {
+      t.classList.toggle('hidden', t.dataset.mode !== mode);
+      t.classList.toggle('active', t.dataset.cat === lbCategory());
+    });
+    updateStartBestText(null);
+    refreshStartRank();
   }
 
   // ---------- Input ----------
@@ -2030,10 +2403,10 @@
     else setDirection(0, dy > 0 ? 1 : -1);
   }
 
-  window.addEventListener('touchstart', swipeStartFn, { passive: true });
-  window.addEventListener('touchmove', swipeMoveFn, { passive: false });
-  window.addEventListener('touchend', swipeEndFn, { passive: true });
-  window.addEventListener('touchcancel', swipeEndFn, { passive: true });
+  canvas.addEventListener('touchstart', swipeStartFn, { passive: true });
+  canvas.addEventListener('touchmove', swipeMoveFn, { passive: false });
+  canvas.addEventListener('touchend', swipeEndFn, { passive: true });
+  canvas.addEventListener('touchcancel', swipeEndFn, { passive: true });
 
   // ---------- Buttons ----------
   btnPlay.addEventListener('click', () => { sfx.ui(); startGame(); });
@@ -2124,11 +2497,12 @@
 
   // ---------- Auto-pause on background ----------
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && running && !gameOver && !paused) {
-      saveGame();
-      setPaused(true);
-    }
+    if (!document.hidden) return;
+    flushProfileSync();
+    autoPause();
   });
+  window.addEventListener('blur', autoPause);
+  window.addEventListener('pagehide', flushProfileSync);
 
   // ---------- Canvas sizing ----------
   function sizeCanvas() {
